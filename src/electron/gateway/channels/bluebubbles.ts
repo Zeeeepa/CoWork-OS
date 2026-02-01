@@ -30,33 +30,9 @@ import {
   ErrorHandler,
   StatusHandler,
   ChannelInfo,
-  ChannelConfig,
+  BlueBubblesConfig,
 } from './types';
 import { BlueBubblesClient, BlueBubblesMessage, BlueBubblesChat } from './bluebubbles-client';
-
-/**
- * BlueBubbles-specific configuration
- */
-export interface BlueBubblesConfig extends ChannelConfig {
-  /** BlueBubbles server URL (e.g., http://192.168.1.100:1234) */
-  serverUrl: string;
-  /** BlueBubbles server password */
-  password: string;
-  /** Enable webhook notifications (default: true) */
-  enableWebhook?: boolean;
-  /** Webhook port to listen on (default: 3101) */
-  webhookPort?: number;
-  /** Webhook path (default: /bluebubbles/webhook) */
-  webhookPath?: string;
-  /** Poll interval in ms if webhooks not available (default: 5000) */
-  pollInterval?: number;
-  /** Response prefix for bot messages */
-  responsePrefix?: string;
-  /** Enable message deduplication (default: true) */
-  deduplicationEnabled?: boolean;
-  /** Allowed contacts (phone numbers or emails) */
-  allowedContacts?: string[];
-}
 
 export class BlueBubblesAdapter implements ChannelAdapter {
   readonly type = 'bluebubbles' as const;

@@ -26,29 +26,13 @@ import {
   ErrorHandler,
   StatusHandler,
   ChannelInfo,
-  ChannelConfig,
+  MattermostConfig,
   MessageAttachment,
 } from './types';
 import { MattermostClient, MattermostPost, MattermostUser } from './mattermost-client';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
-
-/**
- * Mattermost-specific configuration
- */
-export interface MattermostConfig extends ChannelConfig {
-  /** Mattermost server URL (e.g., https://mattermost.example.com) */
-  serverUrl: string;
-  /** Personal access token */
-  token: string;
-  /** Team ID to operate in (optional) */
-  teamId?: string;
-  /** Response prefix for bot messages */
-  responsePrefix?: string;
-  /** Enable message deduplication (default: true) */
-  deduplicationEnabled?: boolean;
-}
 
 export class MattermostAdapter implements ChannelAdapter {
   readonly type = 'mattermost' as const;

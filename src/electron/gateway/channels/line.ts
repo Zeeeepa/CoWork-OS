@@ -31,29 +31,9 @@ import {
   ErrorHandler,
   StatusHandler,
   ChannelInfo,
-  ChannelConfig,
+  LineConfig,
 } from './types';
 import { LineClient, LineMessage, LineUserProfile } from './line-client';
-
-/**
- * LINE-specific configuration
- */
-export interface LineConfig extends ChannelConfig {
-  /** LINE Channel Access Token (long-lived) */
-  channelAccessToken: string;
-  /** LINE Channel Secret (for webhook signature verification) */
-  channelSecret: string;
-  /** Webhook port to listen on (default: 3100) */
-  webhookPort?: number;
-  /** Webhook path (default: /line/webhook) */
-  webhookPath?: string;
-  /** Response prefix for bot messages */
-  responsePrefix?: string;
-  /** Enable message deduplication (default: true) */
-  deduplicationEnabled?: boolean;
-  /** Whether to use reply tokens (faster) or push messages */
-  useReplyTokens?: boolean;
-}
 
 export class LineAdapter implements ChannelAdapter {
   readonly type = 'line' as const;

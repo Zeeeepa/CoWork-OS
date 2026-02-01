@@ -30,47 +30,9 @@ import {
   ErrorHandler,
   StatusHandler,
   ChannelInfo,
-  ChannelConfig,
+  EmailConfig,
 } from './types';
 import { EmailClient, EmailMessage } from './email-client';
-
-/**
- * Email-specific configuration
- */
-export interface EmailConfig extends ChannelConfig {
-  /** IMAP server host */
-  imapHost: string;
-  /** IMAP server port (default: 993) */
-  imapPort?: number;
-  /** IMAP use SSL/TLS (default: true) */
-  imapSecure?: boolean;
-  /** SMTP server host */
-  smtpHost: string;
-  /** SMTP server port (default: 587) */
-  smtpPort?: number;
-  /** SMTP use SSL/TLS (default: false for STARTTLS) */
-  smtpSecure?: boolean;
-  /** Email address (used for both IMAP and SMTP) */
-  email: string;
-  /** Password or app password */
-  password: string;
-  /** Display name for outgoing emails */
-  displayName?: string;
-  /** IMAP mailbox to monitor (default: INBOX) */
-  mailbox?: string;
-  /** Poll interval in ms for IMAP IDLE fallback (default: 30000) */
-  pollInterval?: number;
-  /** Mark emails as read after processing (default: true) */
-  markAsRead?: boolean;
-  /** Response prefix for bot replies */
-  responsePrefix?: string;
-  /** Enable message deduplication (default: true) */
-  deduplicationEnabled?: boolean;
-  /** Allowed sender addresses (empty = allow all) */
-  allowedSenders?: string[];
-  /** Subject prefix filter (only process emails with this prefix) */
-  subjectFilter?: string;
-}
 
 export class EmailAdapter implements ChannelAdapter {
   readonly type = 'email' as const;

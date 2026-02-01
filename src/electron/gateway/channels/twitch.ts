@@ -31,27 +31,9 @@ import {
   ErrorHandler,
   StatusHandler,
   ChannelInfo,
-  ChannelConfig,
+  TwitchConfig,
 } from './types';
 import { TwitchClient, TwitchMessage } from './twitch-client';
-
-/**
- * Twitch-specific configuration
- */
-export interface TwitchConfig extends ChannelConfig {
-  /** Twitch username (login name) */
-  username: string;
-  /** OAuth token (with oauth: prefix or without) */
-  oauthToken: string;
-  /** Channels to join (without # prefix) */
-  channels: string[];
-  /** Response prefix for bot messages */
-  responsePrefix?: string;
-  /** Enable message deduplication (default: true) */
-  deduplicationEnabled?: boolean;
-  /** Whether to respond to whispers (DMs) - default: false */
-  allowWhispers?: boolean;
-}
 
 export class TwitchAdapter implements ChannelAdapter {
   readonly type = 'twitch' as const;

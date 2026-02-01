@@ -28,37 +28,13 @@ import {
   ErrorHandler,
   StatusHandler,
   ChannelInfo,
-  ChannelConfig,
+  MatrixConfig,
   MessageAttachment,
 } from './types';
 import { MatrixClient, MatrixRoomEvent, MatrixUser } from './matrix-client';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
-
-/**
- * Matrix-specific configuration
- */
-export interface MatrixConfig extends ChannelConfig {
-  /** Matrix homeserver URL (e.g., https://matrix.org) */
-  homeserver: string;
-  /** User ID (e.g., @user:matrix.org) */
-  userId: string;
-  /** Access token */
-  accessToken: string;
-  /** Device ID (optional) */
-  deviceId?: string;
-  /** Room IDs to listen to (optional, listens to all joined rooms if not specified) */
-  roomIds?: string[];
-  /** Response prefix for bot messages */
-  responsePrefix?: string;
-  /** Send typing indicators (default: true) */
-  sendTypingIndicators?: boolean;
-  /** Send read receipts (default: true) */
-  sendReadReceipts?: boolean;
-  /** Enable message deduplication (default: true) */
-  deduplicationEnabled?: boolean;
-}
 
 export class MatrixAdapter implements ChannelAdapter {
   readonly type = 'matrix' as const;
