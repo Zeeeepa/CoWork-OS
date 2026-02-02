@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import {
   VoiceSettings as VoiceSettingsType,
   VoiceProvider,
@@ -77,6 +77,10 @@ export function VoiceSettings({ onStateChange }: VoiceSettingsProps) {
   // Test speech state
   const [testingSpeech, setTestingSpeech] = useState(false);
 
+  // Debounce ref for text input saves to prevent race conditions
+  const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const pendingSettingsRef = useRef<Partial<VoiceSettingsType>>({});
+
   useEffect(() => {
     loadSettings();
 
@@ -91,6 +95,10 @@ export function VoiceSettings({ onStateChange }: VoiceSettingsProps) {
 
     return () => {
       unsubscribe();
+      // Clean up pending save on unmount
+      if (saveTimeoutRef.current) {
+        clearTimeout(saveTimeoutRef.current);
+      }
     };
   }, [onStateChange]);
 
@@ -135,45 +143,86 @@ export function VoiceSettings({ onStateChange }: VoiceSettingsProps) {
     }
   };
 
+  // Debounced save for text inputs - prevents race conditions when typing
+  const debouncedSave = useCallback((newSettings: Partial<VoiceSettingsType>) => {
+    // Merge with any pending settings
+    pendingSettingsRef.current = { ...pendingSettingsRef.current, ...newSettings };
+
+    // Update local state immediately for responsive UI
+    setSettings(prev => ({ ...prev, ...newSettings }));
+
+    // Clear existing timeout
+    if (saveTimeoutRef.current) {
+      clearTimeout(saveTimeoutRef.current);
+    }
+
+    // Schedule save after user stops typing
+    saveTimeoutRef.current = setTimeout(async () => {
+      const toSave = pendingSettingsRef.current;
+      pendingSettingsRef.current = {};
+
+      try {
+        setSaving(true);
+        const updated = await window.electronAPI.saveVoiceSettings(toSave);
+        setSettings(updated);
+      } catch (error) {
+        console.error('Failed to save voice settings:', error);
+      } finally {
+        setSaving(false);
+      }
+    }, 500); // Wait 500ms after last keystroke before saving
+  }, []);
+
   const handleToggleEnabled = async () => {
     await saveSettings({ enabled: !settings.enabled });
   };
 
   const handleTTSProviderChange = async (provider: VoiceProvider) => {
-    await saveSettings({ ttsProvider: provider });
+    // When switching to Azure, also switch STT to Azure for consistency
+    // When switching away from Azure, switch STT to OpenAI (most common)
+    if (provider === 'azure' && settings.sttProvider !== 'azure') {
+      await saveSettings({ ttsProvider: provider, sttProvider: 'azure' });
+    } else if (provider !== 'azure' && settings.sttProvider === 'azure') {
+      await saveSettings({ ttsProvider: provider, sttProvider: 'openai' });
+    } else {
+      await saveSettings({ ttsProvider: provider });
+    }
   };
 
   const handleSTTProviderChange = async (provider: VoiceProvider) => {
     await saveSettings({ sttProvider: provider });
   };
 
-  const handleElevenLabsApiKeyChange = async (apiKey: string) => {
-    await saveSettings({ elevenLabsApiKey: apiKey });
+  // Text input handlers use debounced save to prevent race conditions
+  const handleElevenLabsApiKeyChange = (apiKey: string) => {
+    debouncedSave({ elevenLabsApiKey: apiKey });
+    // Load voices after debounce completes
     if (apiKey) {
-      await loadElevenLabsVoices();
+      // Delay voice loading to match save timing
+      setTimeout(() => loadElevenLabsVoices(), 600);
     } else {
       setElevenLabsVoices([]);
     }
   };
 
-  const handleOpenAIApiKeyChange = async (apiKey: string) => {
-    await saveSettings({ openaiApiKey: apiKey });
+  const handleOpenAIApiKeyChange = (apiKey: string) => {
+    debouncedSave({ openaiApiKey: apiKey });
   };
 
-  const handleAzureEndpointChange = async (endpoint: string) => {
-    await saveSettings({ azureEndpoint: endpoint });
+  const handleAzureEndpointChange = (endpoint: string) => {
+    debouncedSave({ azureEndpoint: endpoint });
   };
 
-  const handleAzureApiKeyChange = async (apiKey: string) => {
-    await saveSettings({ azureApiKey: apiKey });
+  const handleAzureApiKeyChange = (apiKey: string) => {
+    debouncedSave({ azureApiKey: apiKey });
   };
 
-  const handleAzureTtsDeploymentChange = async (deploymentName: string) => {
-    await saveSettings({ azureTtsDeploymentName: deploymentName });
+  const handleAzureTtsDeploymentChange = (deploymentName: string) => {
+    debouncedSave({ azureTtsDeploymentName: deploymentName });
   };
 
-  const handleAzureSttDeploymentChange = async (deploymentName: string) => {
-    await saveSettings({ azureSttDeploymentName: deploymentName });
+  const handleAzureSttDeploymentChange = (deploymentName: string) => {
+    debouncedSave({ azureSttDeploymentName: deploymentName });
   };
 
   const handleAzureVoiceChange = async (voice: string) => {
@@ -344,34 +393,60 @@ export function VoiceSettings({ onStateChange }: VoiceSettingsProps) {
         <p className="settings-description">Choose the voice synthesis provider.</p>
         <div className="provider-options">
           <button
-            className={`provider-option ${settings.ttsProvider === 'elevenlabs' ? 'selected' : ''}`}
+            className={`provider-option ${settings.ttsProvider === 'elevenlabs' ? 'selected' : ''} ${settings.elevenLabsApiKey ? 'configured' : ''}`}
             onClick={() => handleTTSProviderChange('elevenlabs')}
             disabled={saving}
           >
-            <span className="provider-name">ElevenLabs</span>
+            <div className="provider-option-header">
+              <span className="provider-name">ElevenLabs</span>
+              {settings.elevenLabsApiKey && (
+                <svg className="provider-configured-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                  <path d="M20 6L9 17l-5-5" />
+                </svg>
+              )}
+            </div>
             <span className="provider-badge">Premium</span>
           </button>
           <button
-            className={`provider-option ${settings.ttsProvider === 'openai' ? 'selected' : ''}`}
+            className={`provider-option ${settings.ttsProvider === 'openai' ? 'selected' : ''} ${settings.openaiApiKey ? 'configured' : ''}`}
             onClick={() => handleTTSProviderChange('openai')}
             disabled={saving}
           >
-            <span className="provider-name">OpenAI</span>
+            <div className="provider-option-header">
+              <span className="provider-name">OpenAI</span>
+              {settings.openaiApiKey && (
+                <svg className="provider-configured-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                  <path d="M20 6L9 17l-5-5" />
+                </svg>
+              )}
+            </div>
           </button>
           <button
-            className={`provider-option ${settings.ttsProvider === 'azure' ? 'selected' : ''}`}
+            className={`provider-option ${settings.ttsProvider === 'azure' ? 'selected' : ''} ${settings.azureApiKey && settings.azureEndpoint ? 'configured' : ''}`}
             onClick={() => handleTTSProviderChange('azure')}
             disabled={saving}
           >
-            <span className="provider-name">Azure OpenAI</span>
+            <div className="provider-option-header">
+              <span className="provider-name">Azure OpenAI</span>
+              {settings.azureApiKey && settings.azureEndpoint && (
+                <svg className="provider-configured-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                  <path d="M20 6L9 17l-5-5" />
+                </svg>
+              )}
+            </div>
             <span className="provider-badge">Enterprise</span>
           </button>
           <button
-            className={`provider-option ${settings.ttsProvider === 'local' ? 'selected' : ''}`}
+            className={`provider-option ${settings.ttsProvider === 'local' ? 'selected' : ''} configured`}
             onClick={() => handleTTSProviderChange('local')}
             disabled={saving}
           >
-            <span className="provider-name">System</span>
+            <div className="provider-option-header">
+              <span className="provider-name">System</span>
+              <svg className="provider-configured-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                <path d="M20 6L9 17l-5-5" />
+              </svg>
+            </div>
             <span className="provider-badge">Free</span>
           </button>
         </div>
@@ -625,27 +700,46 @@ export function VoiceSettings({ onStateChange }: VoiceSettingsProps) {
         <p className="settings-description">Choose the speech recognition provider.</p>
         <div className="provider-options">
           <button
-            className={`provider-option ${settings.sttProvider === 'openai' ? 'selected' : ''}`}
+            className={`provider-option ${settings.sttProvider === 'openai' ? 'selected' : ''} ${settings.openaiApiKey ? 'configured' : ''}`}
             onClick={() => handleSTTProviderChange('openai')}
             disabled={saving}
           >
-            <span className="provider-name">OpenAI Whisper</span>
+            <div className="provider-option-header">
+              <span className="provider-name">OpenAI Whisper</span>
+              {settings.openaiApiKey && (
+                <svg className="provider-configured-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                  <path d="M20 6L9 17l-5-5" />
+                </svg>
+              )}
+            </div>
             <span className="provider-badge">Recommended</span>
           </button>
           <button
-            className={`provider-option ${settings.sttProvider === 'azure' ? 'selected' : ''}`}
+            className={`provider-option ${settings.sttProvider === 'azure' ? 'selected' : ''} ${settings.azureApiKey && settings.azureEndpoint ? 'configured' : ''}`}
             onClick={() => handleSTTProviderChange('azure')}
             disabled={saving}
           >
-            <span className="provider-name">Azure Whisper</span>
+            <div className="provider-option-header">
+              <span className="provider-name">Azure Whisper</span>
+              {settings.azureApiKey && settings.azureEndpoint && (
+                <svg className="provider-configured-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                  <path d="M20 6L9 17l-5-5" />
+                </svg>
+              )}
+            </div>
             <span className="provider-badge">Enterprise</span>
           </button>
           <button
-            className={`provider-option ${settings.sttProvider === 'local' ? 'selected' : ''}`}
+            className={`provider-option ${settings.sttProvider === 'local' ? 'selected' : ''} configured`}
             onClick={() => handleSTTProviderChange('local')}
             disabled={saving}
           >
-            <span className="provider-name">System</span>
+            <div className="provider-option-header">
+              <span className="provider-name">System</span>
+              <svg className="provider-configured-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                <path d="M20 6L9 17l-5-5" />
+              </svg>
+            </div>
             <span className="provider-badge">Free</span>
           </button>
         </div>

@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback } from 'react';
+import { useState, useRef, useCallback, useEffect } from 'react';
 
 export type VoiceInputState = 'idle' | 'recording' | 'processing';
 
@@ -7,6 +7,8 @@ interface UseVoiceInputOptions {
   onTranscript?: (text: string) => void;
   /** Callback on error */
   onError?: (error: string) => void;
+  /** Callback when voice is not configured (user clicks mic but settings not set up) */
+  onNotConfigured?: () => void;
   /** Auto-stop recording after this many milliseconds (default: 30000) */
   maxDuration?: number;
 }
@@ -16,6 +18,8 @@ interface UseVoiceInputReturn {
   state: VoiceInputState;
   /** Whether voice input is available (has microphone permission) */
   isAvailable: boolean;
+  /** Whether voice settings are configured */
+  isConfigured: boolean;
   /** Start recording */
   startRecording: () => Promise<void>;
   /** Stop recording and process */
@@ -31,10 +35,11 @@ interface UseVoiceInputReturn {
 }
 
 export function useVoiceInput(options: UseVoiceInputOptions = {}): UseVoiceInputReturn {
-  const { onTranscript, onError, maxDuration = 30000 } = options;
+  const { onTranscript, onError, onNotConfigured, maxDuration = 30000 } = options;
 
   const [state, setState] = useState<VoiceInputState>('idle');
   const [isAvailable, setIsAvailable] = useState(true);
+  const [isConfigured, setIsConfigured] = useState(false);
   const [audioLevel, setAudioLevel] = useState(0);
   const [error, setError] = useState<string | null>(null);
 
@@ -44,6 +49,25 @@ export function useVoiceInput(options: UseVoiceInputOptions = {}): UseVoiceInput
   const analyserRef = useRef<AnalyserNode | null>(null);
   const animationFrameRef = useRef<number | null>(null);
   const timeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Check if voice settings are configured on mount
+  useEffect(() => {
+    const checkVoiceSettings = async () => {
+      try {
+        const settings = await window.electronAPI.getVoiceSettings();
+        // Check if STT provider is configured with necessary credentials
+        const hasCredentials =
+          (settings.sttProvider === 'azure' && !!settings.azureApiKey && !!settings.azureEndpoint) ||
+          (settings.sttProvider === 'openai' && !!settings.openaiApiKey) ||
+          (settings.sttProvider === 'elevenlabs' && !!settings.elevenLabsApiKey) ||
+          settings.sttProvider === 'local';
+        setIsConfigured(settings.enabled && hasCredentials);
+      } catch {
+        setIsConfigured(false);
+      }
+    };
+    checkVoiceSettings();
+  }, []);
 
   const cleanup = useCallback(() => {
     // Stop animation frame
@@ -94,6 +118,12 @@ export function useVoiceInput(options: UseVoiceInputOptions = {}): UseVoiceInput
 
   const startRecording = useCallback(async () => {
     if (state !== 'idle') return;
+
+    // Check if voice is configured
+    if (!isConfigured) {
+      onNotConfigured?.();
+      return;
+    }
 
     setError(null);
     audioChunksRef.current = [];
@@ -196,7 +226,7 @@ export function useVoiceInput(options: UseVoiceInputOptions = {}): UseVoiceInput
       cleanup();
       setState('idle');
     }
-  }, [state, maxDuration, onTranscript, onError, cleanup, updateAudioLevel]);
+  }, [state, maxDuration, onTranscript, onError, onNotConfigured, isConfigured, cleanup, updateAudioLevel]);
 
   const stopRecording = useCallback(() => {
     if (state !== 'recording' || !mediaRecorderRef.current) return;
@@ -227,6 +257,7 @@ export function useVoiceInput(options: UseVoiceInputOptions = {}): UseVoiceInput
   return {
     state,
     isAvailable,
+    isConfigured,
     startRecording,
     stopRecording,
     cancelRecording,

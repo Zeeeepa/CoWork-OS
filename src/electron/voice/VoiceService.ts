@@ -85,6 +85,28 @@ export class VoiceService extends EventEmitter {
   }
 
   /**
+   * Check if speech-to-text transcription is available
+   * Returns true if an STT provider with valid API keys is configured
+   */
+  isTranscriptionAvailable(): boolean {
+    const { sttProvider, openaiApiKey, azureApiKey, azureEndpoint } = this.settings;
+
+    switch (sttProvider) {
+      case 'openai':
+        return !!openaiApiKey;
+      case 'azure':
+        return !!(azureApiKey && azureEndpoint);
+      case 'elevenlabs':
+        // ElevenLabs uses OpenAI or Azure for STT
+        return !!openaiApiKey || !!(azureApiKey && azureEndpoint);
+      case 'local':
+        return false; // Not available in main process
+      default:
+        return false;
+    }
+  }
+
+  /**
    * Text-to-Speech: Convert text to audio data
    * Returns audio data as Buffer for the renderer to play
    */
@@ -155,9 +177,12 @@ export class VoiceService extends EventEmitter {
   /**
    * Speech-to-Text: Transcribe audio to text
    * Accepts audio data as Buffer from the renderer
+   * @param audioData - Audio data as Buffer
+   * @param options - Optional settings
+   * @param options.force - If true, bypass the enabled check (useful for channel audio messages)
    */
-  async transcribe(audioData: Buffer): Promise<string> {
-    if (!this.settings.enabled) {
+  async transcribe(audioData: Buffer, options?: { force?: boolean }): Promise<string> {
+    if (!this.settings.enabled && !options?.force) {
       throw new Error('Voice mode is disabled');
     }
 
@@ -304,6 +329,7 @@ export class VoiceService extends EventEmitter {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
+          model: deploymentName,
           input: 'Test',
           voice: 'alloy',
         }),
@@ -471,6 +497,7 @@ export class VoiceService extends EventEmitter {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
+        model: deploymentName,
         input: text,
         voice,
         speed: this.settings.speechRate,
