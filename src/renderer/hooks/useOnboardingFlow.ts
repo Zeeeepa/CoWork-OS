@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
-import type { LLMProviderType } from '../../shared/types';
+import type { LLMProviderType, PersonaId } from '../../shared/types';
 
 // Onboarding conversation states
 export type OnboardingState =
@@ -8,6 +8,8 @@ export type OnboardingState =
   | 'greeting'
   | 'ask_name'
   | 'confirm_name'
+  | 'ask_persona'
+  | 'confirm_persona'
   | 'ask_work_style'
   | 'reflect_style'
   | 'transition_setup'
@@ -30,6 +32,9 @@ const SCRIPT = {
     name
       ? `${name}. That feels right. I'll remember that.`
       : "I'll go by CoWork then. Simple and ready.",
+  ask_persona: "How should I show up for you?",
+  confirm_persona_companion: "Then I'll be warm, curious, and present as we work.",
+  confirm_persona_neutral: "Understood. I'll keep things focused and understated.",
   ask_work_style:
     "I want to work the way you do. Do you like having a clear plan, or do you prefer staying flexible?",
   reflect_style_planner:
@@ -76,6 +81,7 @@ interface UseOnboardingOptions {
 
 interface OnboardingData {
   assistantName: string;
+  persona: PersonaId;
   workStyle: 'planner' | 'flexible' | null;
   selectedProvider: LLMProviderType | null;
   apiKey: string;
@@ -90,6 +96,7 @@ export function useOnboardingFlow({ onComplete }: UseOnboardingOptions) {
   const [showProviders, setShowProviders] = useState(false);
   const [showApiInput, setShowApiInput] = useState(false);
   const [showStyleImplications, setShowStyleImplications] = useState(false);
+  const [showPersonaOptions, setShowPersonaOptions] = useState(false);
   const [styleCountdown, setStyleCountdown] = useState(0);
   const [testResult, setTestResult] = useState<{
     success: boolean;
@@ -98,6 +105,7 @@ export function useOnboardingFlow({ onComplete }: UseOnboardingOptions) {
 
   const [data, setData] = useState<OnboardingData>({
     assistantName: '',
+    persona: 'none',
     workStyle: null,
     selectedProvider: null,
     apiKey: '',
@@ -160,6 +168,14 @@ export function useOnboardingFlow({ onComplete }: UseOnboardingOptions) {
         break;
 
       case 'confirm_name':
+        timeoutRef.current = setTimeout(() => {
+          setState('ask_persona');
+          setCurrentText(SCRIPT.ask_persona);
+          setShowPersonaOptions(true);
+        }, 1200);
+        break;
+
+      case 'confirm_persona':
         timeoutRef.current = setTimeout(() => {
           setState('ask_work_style');
           setCurrentText(SCRIPT.ask_work_style);
@@ -228,6 +244,24 @@ export function useOnboardingFlow({ onComplete }: UseOnboardingOptions) {
     }));
     setState('confirm_name');
     setCurrentText(SCRIPT.confirm_name(trimmedName));
+  }, []);
+
+  // Handle persona selection
+  const submitPersona = useCallback((persona: PersonaId) => {
+    setShowPersonaOptions(false);
+    setData((d) => ({ ...d, persona }));
+    setState('confirm_persona');
+    setCurrentText(
+      persona === 'companion'
+        ? SCRIPT.confirm_persona_companion
+        : SCRIPT.confirm_persona_neutral
+    );
+
+    if (window.electronAPI?.setActivePersona) {
+      void window.electronAPI.setActivePersona(persona).catch((error) => {
+        console.error('Failed to set persona during onboarding:', error);
+      });
+    }
   }, []);
 
   // Handle work style selection
@@ -428,6 +462,7 @@ export function useOnboardingFlow({ onComplete }: UseOnboardingOptions) {
         ...currentPersonality,
         agentName: name,
         workStyle: data.workStyle || undefined,
+        activePersona: data.persona || currentPersonality.activePersona,
       });
     } catch (error) {
       console.error('Failed to save onboarding settings:', error);
@@ -449,6 +484,7 @@ export function useOnboardingFlow({ onComplete }: UseOnboardingOptions) {
     showProviders,
     showApiInput,
     showStyleImplications,
+    showPersonaOptions,
     styleCountdown,
     testResult,
     data,
@@ -458,6 +494,7 @@ export function useOnboardingFlow({ onComplete }: UseOnboardingOptions) {
     onAwakeningComplete,
     onTextComplete,
     submitName,
+    submitPersona,
     submitWorkStyle,
     changeWorkStyle,
     selectProvider,
