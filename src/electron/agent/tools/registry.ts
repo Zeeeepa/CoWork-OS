@@ -536,7 +536,7 @@ Plan Control:
 - revise_plan: Modify remaining plan steps when obstacles are encountered or new information discovered
 - switch_workspace: Switch to a different workspace/working directory. Use when you need to work in a different folder.
 - set_personality: Change the assistant's communication style (professional, friendly, concise, creative, technical, casual).
-- set_persona: Change the assistant's character persona (jarvis, friday, hal, computer, alfred, intern, sensei, pirate, noir, or none).
+- set_persona: Change the assistant's character persona (jarvis, friday, hal, computer, alfred, intern, sensei, pirate, noir, companion, or none).
 - set_response_style: Adjust response preferences (emoji_usage, response_length, code_comments, explanation_depth).
 - set_quirks: Set personality quirks (catchphrase, sign_off, analogy_domain).
 - set_agent_name: Set or change the assistant's name when the user wants to give you a name.
@@ -2047,7 +2047,7 @@ ${skillDescriptions}`;
     message: string;
   } {
     const personaId = input.persona as PersonaId;
-    const validIds: PersonaId[] = ['none', 'jarvis', 'friday', 'hal', 'computer', 'alfred', 'intern', 'sensei', 'pirate', 'noir'];
+    const validIds: PersonaId[] = ['none', 'jarvis', 'friday', 'hal', 'computer', 'alfred', 'intern', 'sensei', 'pirate', 'noir', 'companion'];
 
     if (!validIds.includes(personaId)) {
       throw new Error(`Invalid persona: ${personaId}. Valid options are: ${validIds.join(', ')}`);
@@ -2756,13 +2756,14 @@ ${skillDescriptions}`;
           'Use this when the user asks to change persona, act like a character, or wants a specific AI personality. ' +
           'Available personas: jarvis (sophisticated butler), friday (friendly colleague), hal (calm/formal), ' +
           'computer (Star Trek efficient), alfred (refined gentleman), intern (eager learner), sensei (wise teacher), ' +
-          'pirate (swashbuckling adventurer), noir (1940s detective). Use "none" to remove persona overlay.',
+          'pirate (swashbuckling adventurer), noir (1940s detective), companion (warm, thoughtful presence). ' +
+          'Use "none" to remove persona overlay.',
         input_schema: {
           type: 'object',
           properties: {
             persona: {
               type: 'string',
-              enum: ['none', 'jarvis', 'friday', 'hal', 'computer', 'alfred', 'intern', 'sensei', 'pirate', 'noir'],
+              enum: ['none', 'jarvis', 'friday', 'hal', 'computer', 'alfred', 'intern', 'sensei', 'pirate', 'noir', 'companion'],
               description: 'The persona to adopt (or "none" to clear)',
             },
           },
