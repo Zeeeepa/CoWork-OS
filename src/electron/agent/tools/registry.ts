@@ -564,6 +564,8 @@ ${skillDescriptions}`;
     if (name === 'write_file') return await this.fileTools.writeFile(input.path, input.content);
     if (name === 'copy_file') return await this.fileTools.copyFile(input.sourcePath, input.destPath);
     if (name === 'list_directory') return await this.fileTools.listDirectory(input.path);
+    if (name === 'list_directory_with_sizes') return await this.fileTools.listDirectoryWithSizes(input.path);
+    if (name === 'get_file_info') return await this.fileTools.getFileInfo(input.path);
     if (name === 'rename_file') return await this.fileTools.renameFile(input.oldPath, input.newPath);
     if (name === 'delete_file') return await this.fileTools.deleteFile(input.path);
     if (name === 'create_directory') return await this.fileTools.createDirectory(input.path);
@@ -749,6 +751,17 @@ ${skillDescriptions}`;
     // Check if the tool is registered
     if (!mcpManager.hasTool(mcpToolName)) {
       return null;
+    }
+
+    // Guard against using puppeteer_evaluate for Node/shell execution
+    if (mcpToolName === 'puppeteer_evaluate') {
+      const script = typeof input?.script === 'string' ? input.script : '';
+      if (/(require\s*\(|child_process|execSync|exec\(|spawn\()/i.test(script)) {
+        throw new Error(
+          "MCP tool 'puppeteer_evaluate' cannot run Node shell APIs. " +
+          "Use run_command for shell commands or browser_evaluate for DOM-only scripts."
+        );
+      }
     }
 
     // At this point, we know it's a valid MCP tool - any errors should be propagated
@@ -1410,6 +1423,34 @@ ${skillDescriptions}`;
             path: {
               type: 'string',
               description: 'Relative path to the directory (or "." for workspace root)',
+            },
+          },
+          required: ['path'],
+        },
+      },
+      {
+        name: 'list_directory_with_sizes',
+        description: 'List files and folders in a directory with size summary (MCP-style output)',
+        input_schema: {
+          type: 'object',
+          properties: {
+            path: {
+              type: 'string',
+              description: 'Relative or absolute path to the directory',
+            },
+          },
+          required: ['path'],
+        },
+      },
+      {
+        name: 'get_file_info',
+        description: 'Get file or directory metadata (size, timestamps, permissions)',
+        input_schema: {
+          type: 'object',
+          properties: {
+            path: {
+              type: 'string',
+              description: 'Path to the file or directory',
             },
           },
           required: ['path'],

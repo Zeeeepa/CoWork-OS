@@ -10,6 +10,7 @@ interface TaskViewProps {
 export function TaskView({ task }: TaskViewProps) {
   const [events, setEvents] = useState<TaskEvent[]>([]);
   const [pendingApproval, setPendingApproval] = useState<any>(null);
+  const [resuming, setResuming] = useState(false);
 
   useEffect(() => {
     if (!task) {
@@ -25,6 +26,8 @@ export function TaskView({ task }: TaskViewProps) {
         // Check if approval is requested
         if (event.type === 'approval_requested') {
           setPendingApproval(event.payload.approval);
+        } else if (event.type === 'approval_granted' || event.type === 'approval_denied') {
+          setPendingApproval(null);
         }
       }
     });
@@ -46,9 +49,23 @@ export function TaskView({ task }: TaskViewProps) {
     }
   };
 
+  const handleResume = async () => {
+    if (!task) return;
+    try {
+      setResuming(true);
+      await window.electronAPI.resumeTask(task.id);
+    } catch (error) {
+      console.error('Failed to resume task:', error);
+    } finally {
+      setResuming(false);
+    }
+  };
+
   const getStatusBadgeClass = (status: Task['status']) => {
     switch (status) {
       case 'completed': return 'status-completed';
+      case 'paused': return 'status-paused';
+      case 'blocked': return 'status-blocked';
       case 'failed':
       case 'cancelled': return 'status-failed';
       case 'executing':
@@ -56,6 +73,8 @@ export function TaskView({ task }: TaskViewProps) {
       default: return 'status-pending';
     }
   };
+
+  const latestPauseEvent = [...events].reverse().find(event => event.type === 'task_paused');
 
   if (!task) {
     return (
@@ -102,6 +121,29 @@ export function TaskView({ task }: TaskViewProps) {
         </div>
 
         <TaskTimeline events={events} />
+
+        {task.status === 'paused' && (
+          <div className="task-status-banner task-status-banner-paused">
+            <div className="task-status-banner-content">
+              <strong>Paused — waiting on your input</strong>
+              {latestPauseEvent?.payload?.message && (
+                <span className="task-status-banner-detail">{latestPauseEvent.payload.message}</span>
+              )}
+            </div>
+            <button className="btn-secondary" onClick={handleResume} disabled={resuming}>
+              {resuming ? 'Resuming...' : 'Resume'}
+            </button>
+          </div>
+        )}
+
+        {task.status === 'blocked' && (
+          <div className="task-status-banner task-status-banner-blocked">
+            <div className="task-status-banner-content">
+              <strong>Blocked — needs approval</strong>
+              <span className="task-status-banner-detail">Approve the pending request to continue.</span>
+            </div>
+          </div>
+        )}
       </div>
 
       {pendingApproval && (

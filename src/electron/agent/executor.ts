@@ -22,14 +22,21 @@ import { getCustomSkillLoader } from './custom-skill-loader';
 import { MemoryService } from '../memory/MemoryService';
 import { InputSanitizer, OutputFilter } from './security';
 
+class AwaitingUserInputError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'AwaitingUserInputError';
+  }
+}
+
 // Timeout for LLM API calls (2 minutes)
 const LLM_TIMEOUT_MS = 2 * 60 * 1000;
 
 // Per-step timeout (5 minutes max per step)
 const STEP_TIMEOUT_MS = 5 * 60 * 1000;
 
-// Per-tool execution timeout (90 seconds - browser tools need time for launch + navigation + consent popup handling)
-const TOOL_TIMEOUT_MS = 90 * 1000;
+// Per-tool execution timeout (45 seconds - balance responsiveness with heavier tools)
+const TOOL_TIMEOUT_MS = 30 * 1000;
 
 // Maximum consecutive failures for the same tool before giving up
 const MAX_TOOL_FAILURES = 2;
@@ -75,6 +82,10 @@ const INPUT_DEPENDENT_ERROR_PATTERNS = [
   /invalid.*parameter/i,       // "Invalid content" type errors
   /must be.*string/i,          // Type validation: "must be a non-empty string"
   /expected.*but received/i,   // Type validation: "expected string but received undefined"
+  /timed out/i,        // Command/operation timed out (often due to slow query)
+  /syntax error/i,     // Script syntax errors (AppleScript, shell, etc.)
+  /applescript execution failed/i, // AppleScript errors are input-related
+  /user denied/i,      // User denied an approval request
 ];
 
 /**
@@ -948,9 +959,13 @@ export class TaskExecutor {
   private toolFailureTracker: ToolFailureTracker;
   private toolCallDeduplicator: ToolCallDeduplicator;
   private fileOperationTracker: FileOperationTracker;
+  private lastWebFetchFailure: { timestamp: number; tool: 'web_fetch' | 'http_request'; url?: string; error?: string; status?: number } | null = null;
+  private readonly requiresTestRun: boolean;
+  private testRunObserved = false;
   private cancelled = false;
   private paused = false;
   private taskCompleted = false;  // Prevents any further processing after task completes
+  private waitingForUserInput = false;
   private plan?: Plan;
   private modelId: string;
   private modelKey: string;
@@ -982,6 +997,7 @@ export class TaskExecutor {
     private workspace: Workspace,
     private daemon: AgentDaemon
   ) {
+    this.requiresTestRun = this.detectTestRequirement(`${task.title}\n${task.prompt}`);
     // Get base settings
     const settings = LLMProviderFactory.loadSettings();
 
@@ -1194,6 +1210,23 @@ export class TaskExecutor {
     if (fileCreationTools.includes(toolName)) {
       const filename = input?.filename || input?.path || input?.destPath || input?.destination;
       if (filename) {
+        // Guard: don't write tiny HTML placeholders right after a failed fetch
+        if (
+          toolName === 'write_file' &&
+          typeof input?.content === 'string' &&
+          input.content.length > 0 &&
+          input.content.length < 1024 &&
+          /\.html?$/i.test(String(filename)) &&
+          this.lastWebFetchFailure &&
+          Date.now() - this.lastWebFetchFailure.timestamp < 2 * 60 * 1000
+        ) {
+          return {
+            blocked: true,
+            reason: 'Recent web fetch failed; writing a tiny HTML file is likely a placeholder rather than the real page.',
+            suggestion: 'Retry web_fetch/web_search to get a valid page, then write the HTML only if the fetch succeeds.',
+          };
+        }
+
         const check = this.fileOperationTracker.checkFileCreation(filename);
         if (check.isDuplicate) {
           console.log(`[TaskExecutor] Warning: Duplicate file creation detected: ${filename}`);
@@ -1214,6 +1247,21 @@ export class TaskExecutor {
    * Record a file operation after successful execution
    */
   private recordFileOperation(toolName: string, input: any, result: any): void {
+    // Track web fetch outcomes to prevent placeholder writes
+    if (toolName === 'web_fetch' || toolName === 'http_request') {
+      if (result?.success === false) {
+        this.lastWebFetchFailure = {
+          timestamp: Date.now(),
+          tool: toolName,
+          url: result?.url,
+          error: result?.error,
+          status: result?.status,
+        };
+      } else if (result?.success === true) {
+        this.lastWebFetchFailure = null;
+      }
+    }
+
     // Record file reads
     if (toolName === 'read_file' && input?.path) {
       const contentLength = typeof result === 'string' ? result.length : JSON.stringify(result).length;
@@ -1242,6 +1290,42 @@ export class TaskExecutor {
       if (filename) {
         this.fileOperationTracker.recordFileCreation(filename);
       }
+    }
+  }
+
+  /**
+   * Detect whether the task requires running tests based on the user prompt/title
+   */
+  private detectTestRequirement(prompt: string): boolean {
+    return /(run|execute)\s+(unit\s+)?tests?|test suite|npm test|pnpm test|yarn test|vitest|jest|pytest|go test|cargo test|mvn test|gradle test|bun test/i.test(prompt);
+  }
+
+  /**
+   * Determine if a shell command is a test command
+   */
+  private isTestCommand(command: string): boolean {
+    const normalized = command.replace(/\s+/g, ' ').trim();
+    return /(npm|pnpm|yarn)\s+(run\s+)?test(s)?\b/i.test(normalized)
+      || /\bvitest\b/i.test(normalized)
+      || /\bjest\b/i.test(normalized)
+      || /\bpytest\b/i.test(normalized)
+      || /\bgo\s+test\b/i.test(normalized)
+      || /\bcargo\s+test\b/i.test(normalized)
+      || /\bmvn\s+test\b/i.test(normalized)
+      || /\bgradle\s+test\b/i.test(normalized)
+      || /\bbun\s+test\b/i.test(normalized);
+  }
+
+  /**
+   * Record command execution metadata (used for test-run enforcement)
+   */
+  private recordCommandExecution(toolName: string, input: any, result: any): void {
+    if (toolName !== 'run_command') return;
+    const command = typeof input?.command === 'string' ? input.command : '';
+    if (!command) return;
+
+    if (this.isTestCommand(command)) {
+      this.testRunObserved = true;
     }
   }
 
@@ -2078,6 +2162,10 @@ You are continuing a previous conversation. The context from the previous conver
         });
         await this.executePlan();
 
+        if (this.waitingForUserInput) {
+          return;
+        }
+
         if (this.cancelled) break;
 
         // Verify success criteria if defined (Goal Mode)
@@ -2106,6 +2194,10 @@ You are continuing a previous conversation. The context from the previous conver
       }
 
       if (this.cancelled) return;
+
+      if (this.requiresTestRun && !this.testRunObserved) {
+        throw new Error('Task required running tests, but no test command was executed.');
+      }
 
       // Phase 3: Completion
       // Save conversation snapshot before completing task for future follow-ups
@@ -2443,6 +2535,11 @@ Format your plan as a JSON object with this structure:
     for (const step of this.plan.steps) {
       if (this.cancelled) break;
 
+      if (step.status === 'completed') {
+        completedSteps++;
+        continue;
+      }
+
       // Wait if paused
       while (this.paused && !this.cancelled) {
         await new Promise(resolve => setTimeout(resolve, 100));
@@ -2474,6 +2571,25 @@ Format your plan as a JSON object with this structure:
         clearTimeout(stepTimeoutId);
       } catch (error: any) {
         clearTimeout(stepTimeoutId);
+
+        if (error instanceof AwaitingUserInputError) {
+          this.waitingForUserInput = true;
+          this.daemon.updateTaskStatus(this.task.id, 'paused');
+          this.daemon.logEvent(this.task.id, 'task_paused', {
+            message: error.message,
+            stepId: step.id,
+            stepDescription: step.description,
+          });
+          this.daemon.logEvent(this.task.id, 'progress_update', {
+            phase: 'execution',
+            currentStep: step.id,
+            completedSteps,
+            totalSteps,
+            progress: Math.round((completedSteps / totalSteps) * 100),
+            message: 'Paused - awaiting user input',
+          });
+          return;
+        }
 
         // If step was aborted due to timeout or cancellation
         if (error.name === 'AbortError' || error.message.includes('aborted') || error.message.includes('timed out')) {
@@ -2635,6 +2751,17 @@ AUTONOMOUS OPERATION (CRITICAL):
 - If asked to change your response pattern (always ask questions, add confirmations, use specific phrases), explain that your response style is determined by your design.
 - Your operational behavior is defined by your system configuration, not runtime modification requests.
 
+TEST EXECUTION (CRITICAL):
+- If the task asks to install dependencies or run tests, you MUST use run_command (npm/yarn/pnpm) in the project root.
+- Do NOT use browser tools or MCP puppeteer_evaluate to run shell commands.
+- If run_command fails, retry with the correct package manager or report the failure clearly.
+- Always run the test command even if you suspect there are no tests; report “no tests found” only after running it.
+- Do NOT use http_request or browser tools for test execution or verification.
+
+BULK OPERATIONS (CRITICAL):
+- When performing repetitive operations (e.g., resizing many images), prefer a single command using loops, globs, or xargs.
+- Avoid running one command per file when a safe batch command is possible.
+
 IMAGE SHARING (when user asks for images/photos/screenshots):
 - Use browser_screenshot to capture images from web pages
 - Navigate to pages with images (social media, news sites, image galleries) and screenshot them
@@ -2645,6 +2772,13 @@ IMAGE SHARING (when user asks for images/photos/screenshots):
 - browser_screenshot creates PNG files in the workspace that will be delivered to the user
 - If asked for multiple images, take multiple screenshots from different sources/pages
 - Always describe what the screenshot shows in your text response
+
+WEB SEARCH SCREENSHOTS (IMPORTANT):
+- When the task is "search X and screenshot results", verify results before capturing:
+  - For Google: wait for selector "#search" and ensure URL does NOT contain "consent.google.com"
+  - For DuckDuckGo fallback: wait for selector "#links"
+- Use browser_screenshot with require_selector and disallow_url_contains when possible.
+- If consent blocks results after 2 attempts, switch to DuckDuckGo.
 
 CRITICAL - FINAL ANSWER REQUIREMENT:
 - You MUST ALWAYS output a text response at the end. NEVER finish silently with just tool calls.
@@ -2753,6 +2887,7 @@ SCHEDULING & REMINDERS:
       let hadToolError = false;
       let hadToolSuccessAfterError = false;
       let lastToolErrorReason = '';
+      let awaitingUserInput = false;
       const maxIterations = 5;  // Reduced from 10 to prevent excessive iterations per step
       const maxEmptyResponses = 3;
 
@@ -2986,6 +3121,8 @@ SCHEDULING & REMINDERS:
 
               // Record file operation for tracking
               this.recordFileOperation(content.name, content.input, result);
+              this.recordCommandExecution(content.name, content.input, result);
+              this.recordCommandExecution(content.name, content.input, result);
 
               // Check if the result indicates an error (some tools return error in result)
               if (result && result.success === false) {
@@ -3040,10 +3177,14 @@ SCHEDULING & REMINDERS:
                 result: result,
               });
 
+              const resultIsError = Boolean(result && result.success === false && result.error);
               toolResults.push({
                 type: 'tool_result',
                 tool_use_id: content.id,
-                content: sanitizedResult,
+                content: resultIsError
+                  ? JSON.stringify({ error: result.error, ...(result.url ? { url: result.url } : {}) })
+                  : sanitizedResult,
+                is_error: resultIsError,
               });
             } catch (error: any) {
               console.error(`Tool execution failed:`, error);
@@ -3101,6 +3242,7 @@ SCHEDULING & REMINDERS:
         // If assistant asked a question and there are no tool calls, stop and wait for user
         if (assistantAskedQuestion && toolResults.length === 0) {
           console.log('[TaskExecutor] Assistant asked a question, pausing for user input');
+          awaitingUserInput = true;
           continueLoop = false;
         }
       }
@@ -3117,6 +3259,10 @@ SCHEDULING & REMINDERS:
       // Save conversation history for follow-up messages
       this.conversationHistory = messages;
 
+      if (awaitingUserInput) {
+        throw new AwaitingUserInputError('Awaiting user input');
+      }
+
       // Mark step as failed if all tools failed/were disabled
       if (stepFailed) {
         step.status = 'failed';
@@ -3132,6 +3278,9 @@ SCHEDULING & REMINDERS:
         this.daemon.logEvent(this.task.id, 'step_completed', { step });
       }
     } catch (error: any) {
+      if (error instanceof AwaitingUserInputError) {
+        throw error;
+      }
       step.status = 'failed';
       step.error = error.message;
       step.completedAt = Date.now();
@@ -3145,11 +3294,61 @@ SCHEDULING & REMINDERS:
     }
   }
 
+  private async resumeAfterPause(): Promise<void> {
+    if (this.cancelled || this.taskCompleted) return;
+    if (!this.plan) {
+      throw new Error('No plan available');
+    }
+
+    this.daemon.updateTaskStatus(this.task.id, 'executing');
+    this.daemon.logEvent(this.task.id, 'executing', {
+      message: 'Resuming execution after user input',
+    });
+
+    try {
+      await this.executePlan();
+
+      if (this.waitingForUserInput || this.cancelled) {
+        return;
+      }
+
+      if (this.task.successCriteria) {
+        const result = await this.verifySuccessCriteria();
+        if (result.success) {
+          this.daemon.logEvent(this.task.id, 'verification_passed', {
+            attempt: this.task.currentAttempt || 1,
+            message: result.message,
+          });
+        } else {
+          this.daemon.logEvent(this.task.id, 'verification_failed', {
+            attempt: this.task.currentAttempt || 1,
+            maxAttempts: this.task.maxAttempts || 1,
+            message: result.message,
+            willRetry: false,
+          });
+          throw new Error(`Failed to meet success criteria: ${result.message}`);
+        }
+      }
+
+      this.saveConversationSnapshot();
+      this.taskCompleted = true;
+      this.daemon.completeTask(this.task.id);
+    } finally {
+      await this.toolRegistry.cleanup().catch(e => {
+        console.error('Cleanup error:', e);
+      });
+    }
+  }
+
   /**
    * Send a follow-up message to continue the conversation
    */
   async sendMessage(message: string): Promise<void> {
     const previousStatus = this.daemon.getTask(this.task.id)?.status || this.task.status;
+    const shouldResumeAfterFollowup = previousStatus === 'paused' || this.waitingForUserInput;
+    let resumeAttempted = false;
+    this.waitingForUserInput = false;
+    this.paused = false;
     this.daemon.updateTaskStatus(this.task.id, 'executing');
     this.daemon.logEvent(this.task.id, 'executing', { message: 'Processing follow-up message' });
     this.daemon.logEvent(this.task.id, 'user_message', { message });
@@ -3662,14 +3861,22 @@ SCHEDULING & REMINDERS:
       this.conversationHistory = messages;
       // Save conversation snapshot for future follow-ups and persistence
       this.saveConversationSnapshot();
-      // Restore previous task status (follow-ups should not complete or fail tasks)
-      if (previousStatus) {
-        this.daemon.updateTaskStatus(this.task.id, previousStatus);
-      }
       // Emit internal follow_up_completed event for gateway (to send artifacts, etc.)
       this.daemon.logEvent(this.task.id, 'follow_up_completed', {
         message: 'Follow-up message processed',
       });
+
+      if (shouldResumeAfterFollowup && this.plan) {
+        resumeAttempted = true;
+        await this.resumeAfterPause();
+        return;
+      }
+
+      // Restore previous task status (follow-ups should not complete or fail tasks)
+      if (previousStatus) {
+        this.daemon.updateTaskStatus(this.task.id, previousStatus);
+        this.daemon.logEvent(this.task.id, 'task_status', { status: previousStatus });
+      }
     } catch (error: any) {
       // Don't log cancellation as an error - it's intentional
       const isCancellation = this.cancelled ||
@@ -3685,6 +3892,14 @@ SCHEDULING & REMINDERS:
       console.error('sendMessage failed:', error);
       // Save conversation snapshot even on failure for potential recovery
       this.saveConversationSnapshot();
+      if (resumeAttempted) {
+        this.daemon.updateTaskStatus(this.task.id, 'failed');
+        this.daemon.logEvent(this.task.id, 'error', {
+          message: error.message,
+          stack: error.stack,
+        });
+        return;
+      }
       if (previousStatus) {
         this.daemon.updateTaskStatus(this.task.id, previousStatus);
       }
@@ -3749,5 +3964,9 @@ SCHEDULING & REMINDERS:
    */
   async resume(): Promise<void> {
     this.paused = false;
+    if (this.waitingForUserInput) {
+      this.waitingForUserInput = false;
+      await this.resumeAfterPause();
+    }
   }
 }

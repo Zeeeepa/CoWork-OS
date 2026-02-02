@@ -74,6 +74,23 @@ export class BrowserTools {
             full_page: {
               type: 'boolean',
               description: 'Capture the full scrollable page. Default: false'
+            },
+            require_selector: {
+              type: 'string',
+              description: 'Optional CSS selector that must be present/visible before taking the screenshot'
+            },
+            disallow_url_contains: {
+              type: 'array',
+              items: { type: 'string' },
+              description: 'If current URL contains any of these substrings, abort screenshot'
+            },
+            max_wait_ms: {
+              type: 'number',
+              description: 'Max wait time for require_selector (ms). Default: 10000'
+            },
+            allow_consent: {
+              type: 'boolean',
+              description: 'Allow screenshots of consent pages (default: false)'
             }
           }
         }
@@ -308,9 +325,41 @@ export class BrowserTools {
       }
 
       case 'browser_screenshot': {
+        const {
+          filename,
+          full_page,
+          require_selector,
+          disallow_url_contains,
+          max_wait_ms,
+          allow_consent
+        } = input || {};
+
+        if (require_selector) {
+          const waitResult = await this.browserService.waitForSelector(require_selector, max_wait_ms || 10000);
+          if (!waitResult.success) {
+            throw new Error(`Required selector not found: ${require_selector}`);
+          }
+        }
+
+        if (!allow_consent) {
+          const currentUrl = await this.browserService.getCurrentUrl();
+          if (currentUrl.includes('consent.google.com')) {
+            throw new Error('Consent page detected; dismiss consent before taking screenshot.');
+          }
+        }
+
+        if (Array.isArray(disallow_url_contains) && disallow_url_contains.length > 0) {
+          const currentUrl = await this.browserService.getCurrentUrl();
+          for (const fragment of disallow_url_contains) {
+            if (fragment && currentUrl.includes(fragment)) {
+              throw new Error(`Current URL matches disallowed fragment: ${fragment}`);
+            }
+          }
+        }
+
         const result = await this.browserService.screenshot(
-          input.filename,
-          input.full_page || false
+          filename,
+          full_page || false
         );
         // Construct full path for the screenshot
         const fullPath = path.join(this.workspace.path, result.path);
@@ -420,6 +469,10 @@ export class BrowserTools {
       }
 
       case 'browser_evaluate': {
+        const script = typeof input?.script === 'string' ? input.script : '';
+        if (/(require\s*\(|child_process|execSync|exec\(|spawn\()/i.test(script)) {
+          throw new Error('browser_evaluate cannot run Node.js APIs. Use run_command for shell commands.');
+        }
         const result = await this.browserService.evaluate(input.script);
         this.daemon.logEvent(this.taskId, 'browser_action', {
           action: 'evaluate',

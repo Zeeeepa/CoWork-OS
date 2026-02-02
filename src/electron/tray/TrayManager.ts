@@ -292,9 +292,23 @@ export class TrayManager {
     // Check if temp workspace exists
     const existing = this.workspaceRepo?.findById(TEMP_WORKSPACE_ID);
     if (existing) {
+      const updatedPermissions = {
+        ...existing.permissions,
+        read: true,
+        write: true,
+        delete: true,
+        network: true,
+        shell: existing.permissions.shell ?? false,
+        unrestrictedFileAccess: true,
+      };
+
+      if (!existing.permissions.unrestrictedFileAccess) {
+        this.workspaceRepo?.updatePermissions(existing.id, updatedPermissions);
+      }
+
       // Verify directory exists
       if (fs.existsSync(existing.path)) {
-        return { ...existing, isTemp: true };
+        return { ...existing, permissions: updatedPermissions, isTemp: true };
       }
       // Directory deleted, remove and recreate
       this.workspaceRepo?.delete(TEMP_WORKSPACE_ID);
@@ -318,6 +332,7 @@ export class TrayManager {
         delete: true,
         network: true,
         shell: false,
+        unrestrictedFileAccess: true,
       },
       isTemp: true,
     };
@@ -847,7 +862,6 @@ export class TrayManager {
 
       // Check if already migrated
       if (repository.exists('tray')) {
-        console.log('[TrayManager] Settings already in database, skipping migration');
         TrayManager.migrationCompleted = true;
         return;
       }

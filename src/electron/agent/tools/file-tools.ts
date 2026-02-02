@@ -18,6 +18,7 @@ const pdfParse = (typeof pdfParseModule === 'function' ? pdfParseModule : pdfPar
 const MAX_FILE_SIZE = 100 * 1024; // 100KB max for file reads
 const MAX_DIR_ENTRIES = 100; // Max files to list per directory
 const MAX_SEARCH_RESULTS = 50; // Max search results
+const MAX_NAME_PAD = 48; // Cap for aligned directory listings
 
 /**
  * FileTools implements safe file operations within the workspace
@@ -100,7 +101,7 @@ export class FileTools {
       }
 
       // Outside workspace - check permissions
-      if (this.workspace.permissions.unrestrictedFileAccess) {
+      if (this.workspace.isTemp || this.workspace.permissions.unrestrictedFileAccess) {
         // With unrestricted access, block protected paths for writes
         if (operation !== 'read' && this.isProtectedPath(absolutePath)) {
           throw new Error(`Cannot ${operation} protected system path: ${absolutePath}`);
@@ -128,7 +129,7 @@ export class FileTools {
 
     if (relative.startsWith('..') || path.isAbsolute(relative)) {
       // Path escapes workspace via ../ traversal
-      if (this.workspace.permissions.unrestrictedFileAccess) {
+      if (this.workspace.isTemp || this.workspace.permissions.unrestrictedFileAccess) {
         if (operation !== 'read' && this.isProtectedPath(resolved)) {
           throw new Error(`Cannot ${operation} protected system path: ${resolved}`);
         }
@@ -413,6 +414,98 @@ export class FileTools {
   }
 
   /**
+   * List directory contents in a compact, size-aware format
+   * Mirrors MCP filesystem output for easier agent consumption.
+   */
+  async listDirectoryWithSizes(relativePath: string = '.'): Promise<{
+    output: string;
+    files: Array<{ name: string; type: 'file' | 'directory'; size: number }>;
+    totalCount: number;
+    truncated?: boolean;
+    combinedSize: number;
+  }> {
+    const pathToUse = (relativePath && typeof relativePath === 'string') ? relativePath : '.';
+
+    this.checkPermission('read');
+    const fullPath = this.resolvePath(pathToUse, 'read');
+
+    try {
+      const entries = await fs.readdir(fullPath, { withFileTypes: true });
+      const totalCount = entries.length;
+      const limitedEntries = entries.slice(0, MAX_DIR_ENTRIES);
+
+      const files = await Promise.all(
+        limitedEntries.map(async entry => {
+          const entryPath = path.join(fullPath, entry.name);
+          try {
+            const stats = await fs.stat(entryPath);
+            return {
+              name: entry.name,
+              type: entry.isDirectory() ? 'directory' as const : 'file' as const,
+              size: stats.size,
+            };
+          } catch {
+            return {
+              name: entry.name,
+              type: entry.isDirectory() ? 'directory' as const : 'file' as const,
+              size: 0,
+            };
+          }
+        })
+      );
+
+      const combinedSize = files.reduce((sum, entry) => sum + (entry.type === 'file' ? entry.size : 0), 0);
+      const output = this.formatDirectoryListing(files, combinedSize);
+
+      return {
+        output,
+        files,
+        totalCount,
+        truncated: totalCount > MAX_DIR_ENTRIES,
+        combinedSize,
+      };
+    } catch (error: any) {
+      throw new Error(`Failed to list directory: ${error.message}`);
+    }
+  }
+
+  /**
+   * Get file or directory metadata
+   */
+  async getFileInfo(relativePath: string): Promise<{
+    size: number;
+    created: string;
+    modified: string;
+    accessed: string;
+    isDirectory: boolean;
+    isFile: boolean;
+    permissions: string;
+  }> {
+    if (!relativePath || typeof relativePath !== 'string') {
+      throw new Error('Invalid path: path must be a non-empty string');
+    }
+
+    this.checkPermission('read');
+    const fullPath = this.resolvePath(relativePath, 'read');
+
+    try {
+      const stats = await fs.stat(fullPath);
+      const permissions = (stats.mode & 0o777).toString(8);
+      return {
+        size: stats.size,
+        created: stats.birthtime.toISOString(),
+        modified: stats.mtime.toISOString(),
+        accessed: stats.atime.toISOString(),
+        isDirectory: stats.isDirectory(),
+        isFile: stats.isFile(),
+        permissions,
+      };
+    } catch (error: any) {
+      throw new Error(`Failed to get file info: ${error.message}`);
+    }
+  }
+
+  /**
    * Rename or move file
    */
   async renameFile(oldPath: string, newPath: string): Promise<{ success: boolean }> {
@@ -675,5 +768,44 @@ export class FileTools {
     } catch (error: any) {
       throw new Error(`Search failed: ${error.message}`);
     }
+  }
+
+  /**
+   * Format directory listing to match MCP-style output
+   */
+  private formatDirectoryListing(
+    entries: Array<{ name: string; type: 'file' | 'directory'; size: number }>,
+    combinedSize: number
+  ): string {
+    const maxNameLength = entries.reduce((max, entry) => Math.max(max, entry.name.length), 0);
+    const namePad = Math.min(Math.max(maxNameLength + 2, 16), MAX_NAME_PAD);
+
+    const lines = entries.map(entry => {
+      const label = entry.type === 'directory' ? '[DIR]' : '[FILE]';
+      const name = entry.name.padEnd(namePad, ' ');
+      const size = entry.type === 'file' ? this.formatBytes(entry.size) : '';
+      return `${label} ${name}${size}`.trimEnd();
+    });
+
+    const fileCount = entries.filter(entry => entry.type === 'file').length;
+    const dirCount = entries.filter(entry => entry.type === 'directory').length;
+    lines.push('');
+    lines.push(`Total: ${fileCount} files, ${dirCount} directories`);
+    lines.push(`Combined size: ${this.formatBytes(combinedSize)}`);
+
+    return lines.join('\n');
+  }
+
+  /**
+   * Human-readable byte formatting
+   */
+  private formatBytes(bytes: number): string {
+    if (bytes < 1024) return `${bytes} B`;
+    const kb = bytes / 1024;
+    if (kb < 1024) return `${kb.toFixed(2)} KB`;
+    const mb = kb / 1024;
+    if (mb < 1024) return `${mb.toFixed(2)} MB`;
+    const gb = mb / 1024;
+    return `${gb.toFixed(2)} GB`;
   }
 }

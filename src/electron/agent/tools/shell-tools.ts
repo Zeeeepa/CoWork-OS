@@ -150,6 +150,8 @@ function killProcessTree(pid: number, signal: NodeJS.Signals): void {
  * ShellTools implements shell command execution with user approval
  */
 export class ShellTools {
+  private readonly recentApprovals = new Map<string, { approvedAt: number; count: number }>();
+  private readonly approvalWindowMs = 2 * 60 * 1000;
   // Track the currently running child process for stdin support
   private activeProcess: ChildProcess | null = null;
   // Track escalation timeouts so we can cancel them when process exits
@@ -360,6 +362,7 @@ export class ShellTools {
     stderr: string;
     exitCode: number | null;
     truncated?: boolean;
+    terminationReason?: CommandTerminationReason;
   }> {
     // Check if command is blocked by guardrails BEFORE anything else
     const blockCheck = GuardrailManager.isCommandBlocked(command);
@@ -383,17 +386,41 @@ export class ShellTools {
         command,
       });
     } else {
-      // Request user approval before executing
-      approved = await this.daemon.requestApproval(
-        this.taskId,
-        'run_command',
-        `Run command: ${command}`,
-        {
+      const signature = this.getCommandSignature(command);
+      const previousApproval = signature ? this.recentApprovals.get(signature) : undefined;
+      const now = Date.now();
+
+      if (
+        signature &&
+        previousApproval &&
+        now - previousApproval.approvedAt <= this.approvalWindowMs &&
+        this.isAutoApprovalSafe(command)
+      ) {
+        approved = true;
+        previousApproval.count += 1;
+        previousApproval.approvedAt = now;
+        this.recentApprovals.set(signature, previousApproval);
+        this.daemon.logEvent(this.taskId, 'log', {
+          message: `Auto-approved similar command (approved ${previousApproval.count}x in last ${Math.round(this.approvalWindowMs / 1000)}s)`,
           command,
-          cwd: options?.cwd || this.workspace.path,
-          timeout: options?.timeout || DEFAULT_TIMEOUT,
+        });
+      } else {
+        // Request user approval before executing
+        approved = await this.daemon.requestApproval(
+          this.taskId,
+          'run_command',
+          `Run command: ${command}`,
+          {
+            command,
+            cwd: options?.cwd || this.workspace.path,
+            timeout: options?.timeout || DEFAULT_TIMEOUT,
+          }
+        );
+
+        if (approved && signature) {
+          this.recentApprovals.set(signature, { approvedAt: now, count: 1 });
         }
-      );
+      }
     }
 
     if (!approved) {
@@ -506,9 +533,17 @@ export class ShellTools {
         // Reset for next command
         this.userKillRequested = false;
 
-        const success = code === 0 && terminationReason === 'normal';
+        const success = terminationReason === 'normal' && code === 0;
         const truncatedStdout = this.truncateOutput(stdout);
         const truncatedStderr = this.truncateOutput(stderr);
+        const exitCodeLabel = code === null ? 'unknown' : String(code);
+        const errorMessage = terminationReason === 'timeout'
+          ? 'Command timed out'
+          : terminationReason === 'user_stopped'
+            ? 'Command stopped by user'
+            : !success
+              ? `Command exited with code ${exitCodeLabel}`
+              : undefined;
 
         // Emit command completion with termination reason
         this.daemon.logEvent(this.taskId, 'command_output', {
@@ -524,8 +559,7 @@ export class ShellTools {
           success,
           exitCode: code,
           terminationReason,
-          error: terminationReason === 'timeout' ? 'Command timed out' :
-                 terminationReason === 'user_stopped' ? 'Command stopped by user' : undefined,
+          error: errorMessage,
         });
 
         resolve({
@@ -571,6 +605,26 @@ export class ShellTools {
         });
       });
     });
+  }
+
+  /**
+   * Generate a normalized signature for a command to detect similar repeats
+   */
+  private getCommandSignature(command: string): string {
+    if (!command) return '';
+    let signature = command.trim();
+    signature = signature.replace(/\s+/g, ' ');
+    signature = signature.replace(/"(?:[^"\\]|\\.)*"/g, '"<arg>"');
+    signature = signature.replace(/'(?:[^'\\]|\\.)*'/g, "'<arg>'");
+    signature = signature.replace(/(?:\/Users\/[^\s]+|~\/[^\s]+|\/[^\s]+)/g, '<path>');
+    return signature;
+  }
+
+  /**
+   * Safety check for auto-approving similar commands
+   */
+  private isAutoApprovalSafe(command: string): boolean {
+    return !/(^|\s)(sudo|rm|dd|mkfs|diskutil|shutdown|reboot|killall)\b/i.test(command);
   }
 
   /**

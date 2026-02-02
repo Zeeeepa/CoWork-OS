@@ -6,8 +6,6 @@
  */
 
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
-import * as fs from 'fs';
-import * as path from 'path';
 
 // Mock electron app module
 vi.mock('electron', () => ({
@@ -16,11 +14,32 @@ vi.mock('electron', () => ({
   },
 }));
 
-// Mock fs module
+let mockStoredSettings: any = undefined;
+const mockRepositorySave = vi.fn().mockImplementation((_category: string, settings: any) => {
+  mockStoredSettings = settings;
+});
+const mockRepositoryLoad = vi.fn().mockImplementation(() => mockStoredSettings);
+const mockRepositoryExists = vi.fn().mockImplementation(() => mockStoredSettings !== undefined);
+
+// Mock SecureSettingsRepository
+vi.mock('../../src/electron/database/SecureSettingsRepository', () => ({
+  SecureSettingsRepository: {
+    isInitialized: vi.fn().mockReturnValue(true),
+    getInstance: vi.fn().mockImplementation(() => ({
+      save: mockRepositorySave,
+      load: mockRepositoryLoad,
+      exists: mockRepositoryExists,
+    })),
+  },
+}));
+
+// Mock fs module (legacy migration path)
 vi.mock('fs', () => ({
-  existsSync: vi.fn(),
-  readFileSync: vi.fn(),
+  existsSync: vi.fn().mockReturnValue(false),
+  readFileSync: vi.fn().mockReturnValue('{}'),
   writeFileSync: vi.fn(),
+  copyFileSync: vi.fn(),
+  unlinkSync: vi.fn(),
 }));
 
 // Import after mocks are set up
@@ -36,6 +55,8 @@ describe('BuiltinToolsSettingsManager', () => {
     BuiltinToolsSettingsManager.clearCache();
     // Reset all mocks
     vi.clearAllMocks();
+    mockStoredSettings = undefined;
+    (BuiltinToolsSettingsManager as any).migrationCompleted = false;
   });
 
   afterEach(() => {
@@ -44,8 +65,7 @@ describe('BuiltinToolsSettingsManager', () => {
 
   describe('loadSettings', () => {
     it('should return default settings when no settings file exists', () => {
-      vi.mocked(fs.existsSync).mockReturnValue(false);
-
+      mockStoredSettings = undefined;
       const settings = BuiltinToolsSettingsManager.loadSettings();
 
       expect(settings).toBeDefined();
@@ -70,8 +90,7 @@ describe('BuiltinToolsSettingsManager', () => {
         version: '1.0.0',
       };
 
-      vi.mocked(fs.existsSync).mockReturnValue(true);
-      vi.mocked(fs.readFileSync).mockReturnValue(JSON.stringify(savedSettings));
+      mockStoredSettings = savedSettings;
 
       const settings = BuiltinToolsSettingsManager.loadSettings();
 
@@ -95,8 +114,7 @@ describe('BuiltinToolsSettingsManager', () => {
         version: '1.0.0',
       };
 
-      vi.mocked(fs.existsSync).mockReturnValue(true);
-      vi.mocked(fs.readFileSync).mockReturnValue(JSON.stringify(partialSettings));
+      mockStoredSettings = partialSettings as BuiltinToolsSettings;
 
       const settings = BuiltinToolsSettingsManager.loadSettings();
 
@@ -106,20 +124,19 @@ describe('BuiltinToolsSettingsManager', () => {
     });
 
     it('should cache settings after first load', () => {
-      vi.mocked(fs.existsSync).mockReturnValue(false);
-
       // First call
       BuiltinToolsSettingsManager.loadSettings();
       // Second call
       BuiltinToolsSettingsManager.loadSettings();
 
-      // existsSync should only be called once due to caching
-      expect(fs.existsSync).toHaveBeenCalledTimes(1);
+      // Repository load should only be called once due to caching
+      expect(mockRepositoryLoad).toHaveBeenCalledTimes(1);
     });
 
     it('should handle JSON parse errors gracefully', () => {
-      vi.mocked(fs.existsSync).mockReturnValue(true);
-      vi.mocked(fs.readFileSync).mockReturnValue('invalid json');
+      mockRepositoryLoad.mockImplementationOnce(() => {
+        throw new Error('invalid json');
+      });
 
       const settings = BuiltinToolsSettingsManager.loadSettings();
 
@@ -129,33 +146,25 @@ describe('BuiltinToolsSettingsManager', () => {
   });
 
   describe('saveSettings', () => {
-    it('should write settings to the correct file path', () => {
+    it('should save settings to the repository', () => {
       const settings = BuiltinToolsSettingsManager.getDefaultSettings();
       settings.categories.browser.enabled = false;
 
       BuiltinToolsSettingsManager.saveSettings(settings);
 
-      expect(fs.writeFileSync).toHaveBeenCalledWith(
-        '/mock/user/data/builtin-tools-settings.json',
-        expect.any(String),
-        'utf-8'
-      );
+      expect(mockRepositorySave).toHaveBeenCalledWith('builtintools', settings);
     });
 
-    it('should serialize settings as formatted JSON', () => {
+    it('should persist settings data', () => {
       const settings = BuiltinToolsSettingsManager.getDefaultSettings();
 
       BuiltinToolsSettingsManager.saveSettings(settings);
 
-      const writtenData = vi.mocked(fs.writeFileSync).mock.calls[0][1] as string;
-      const parsed = JSON.parse(writtenData);
-      expect(parsed.categories).toBeDefined();
-      expect(parsed.version).toBe('1.0.0');
+      expect(mockStoredSettings.categories).toBeDefined();
+      expect(mockStoredSettings.version).toBe('1.0.0');
     });
 
     it('should update the cache after saving', () => {
-      vi.mocked(fs.existsSync).mockReturnValue(false);
-
       // Load defaults
       let settings = BuiltinToolsSettingsManager.loadSettings();
       expect(settings.categories.browser.enabled).toBe(true);
@@ -169,21 +178,16 @@ describe('BuiltinToolsSettingsManager', () => {
       // Load again - should return cached value without reading file
       const loaded = BuiltinToolsSettingsManager.loadSettings();
       expect(loaded.categories.browser.enabled).toBe(false);
-      // existsSync should only have been called once (initial load)
-      expect(fs.existsSync).toHaveBeenCalledTimes(1);
+      // Repository load should only have been called once (initial load)
+      expect(mockRepositoryLoad).toHaveBeenCalledTimes(1);
     });
   });
 
   describe('isToolEnabled', () => {
-    beforeEach(() => {
-      vi.mocked(fs.existsSync).mockReturnValue(false);
-    });
-
     it('should return true for tools in enabled categories', () => {
       const settings = BuiltinToolsSettingsManager.getDefaultSettings();
       settings.categories.browser.enabled = true;
-      vi.mocked(fs.existsSync).mockReturnValue(true);
-      vi.mocked(fs.readFileSync).mockReturnValue(JSON.stringify(settings));
+      mockStoredSettings = settings;
       BuiltinToolsSettingsManager.clearCache();
 
       expect(BuiltinToolsSettingsManager.isToolEnabled('browser_navigate')).toBe(true);
@@ -193,8 +197,7 @@ describe('BuiltinToolsSettingsManager', () => {
     it('should return false for tools in disabled categories', () => {
       const settings = BuiltinToolsSettingsManager.getDefaultSettings();
       settings.categories.browser.enabled = false;
-      vi.mocked(fs.existsSync).mockReturnValue(true);
-      vi.mocked(fs.readFileSync).mockReturnValue(JSON.stringify(settings));
+      mockStoredSettings = settings;
       BuiltinToolsSettingsManager.clearCache();
 
       expect(BuiltinToolsSettingsManager.isToolEnabled('browser_navigate')).toBe(false);
@@ -205,8 +208,7 @@ describe('BuiltinToolsSettingsManager', () => {
       const settings = BuiltinToolsSettingsManager.getDefaultSettings();
       settings.categories.browser.enabled = true;
       settings.toolOverrides['browser_navigate'] = { enabled: false };
-      vi.mocked(fs.existsSync).mockReturnValue(true);
-      vi.mocked(fs.readFileSync).mockReturnValue(JSON.stringify(settings));
+      mockStoredSettings = settings;
       BuiltinToolsSettingsManager.clearCache();
 
       // Tool override should take precedence
@@ -231,15 +233,10 @@ describe('BuiltinToolsSettingsManager', () => {
   });
 
   describe('getToolPriority', () => {
-    beforeEach(() => {
-      vi.mocked(fs.existsSync).mockReturnValue(false);
-    });
-
     it('should return category priority for tools', () => {
       const settings = BuiltinToolsSettingsManager.getDefaultSettings();
       settings.categories.browser.priority = 'high';
-      vi.mocked(fs.existsSync).mockReturnValue(true);
-      vi.mocked(fs.readFileSync).mockReturnValue(JSON.stringify(settings));
+      mockStoredSettings = settings;
       BuiltinToolsSettingsManager.clearCache();
 
       expect(BuiltinToolsSettingsManager.getToolPriority('browser_navigate')).toBe('high');
@@ -253,8 +250,7 @@ describe('BuiltinToolsSettingsManager', () => {
       const settings = BuiltinToolsSettingsManager.getDefaultSettings();
       settings.categories.browser.priority = 'high';
       settings.toolOverrides['browser_navigate'] = { enabled: true, priority: 'low' };
-      vi.mocked(fs.existsSync).mockReturnValue(true);
-      vi.mocked(fs.readFileSync).mockReturnValue(JSON.stringify(settings));
+      mockStoredSettings = settings;
       BuiltinToolsSettingsManager.clearCache();
 
       // Tool override should take precedence
@@ -341,64 +337,41 @@ describe('BuiltinToolsSettingsManager', () => {
   });
 
   describe('setCategoryEnabled', () => {
-    beforeEach(() => {
-      vi.mocked(fs.existsSync).mockReturnValue(false);
-    });
-
     it('should enable a category', () => {
       BuiltinToolsSettingsManager.setCategoryEnabled('browser', true);
 
-      expect(fs.writeFileSync).toHaveBeenCalled();
-      const writtenData = vi.mocked(fs.writeFileSync).mock.calls[0][1] as string;
-      const parsed = JSON.parse(writtenData);
-      expect(parsed.categories.browser.enabled).toBe(true);
+      expect(mockStoredSettings.categories.browser.enabled).toBe(true);
     });
 
     it('should disable a category', () => {
       BuiltinToolsSettingsManager.setCategoryEnabled('browser', false);
 
-      const writtenData = vi.mocked(fs.writeFileSync).mock.calls[0][1] as string;
-      const parsed = JSON.parse(writtenData);
-      expect(parsed.categories.browser.enabled).toBe(false);
+      expect(mockStoredSettings.categories.browser.enabled).toBe(false);
     });
   });
 
   describe('setCategoryPriority', () => {
-    beforeEach(() => {
-      vi.mocked(fs.existsSync).mockReturnValue(false);
-    });
-
     it('should set category priority to high', () => {
       BuiltinToolsSettingsManager.setCategoryPriority('browser', 'high');
 
-      const writtenData = vi.mocked(fs.writeFileSync).mock.calls[0][1] as string;
-      const parsed = JSON.parse(writtenData);
-      expect(parsed.categories.browser.priority).toBe('high');
+      expect(mockStoredSettings.categories.browser.priority).toBe('high');
     });
 
     it('should set category priority to low', () => {
       BuiltinToolsSettingsManager.setCategoryPriority('search', 'low');
 
-      const writtenData = vi.mocked(fs.writeFileSync).mock.calls[0][1] as string;
-      const parsed = JSON.parse(writtenData);
-      expect(parsed.categories.search.priority).toBe('low');
+      expect(mockStoredSettings.categories.search.priority).toBe('low');
     });
   });
 
   describe('setToolOverride', () => {
-    beforeEach(() => {
-      vi.mocked(fs.existsSync).mockReturnValue(false);
-    });
-
     it('should add a tool override', () => {
       BuiltinToolsSettingsManager.setToolOverride('browser_navigate', {
         enabled: false,
         priority: 'low',
       });
 
-      const writtenData = vi.mocked(fs.writeFileSync).mock.calls[0][1] as string;
-      const parsed = JSON.parse(writtenData);
-      expect(parsed.toolOverrides['browser_navigate']).toEqual({
+      expect(mockStoredSettings.toolOverrides['browser_navigate']).toEqual({
         enabled: false,
         priority: 'low',
       });
@@ -408,37 +381,32 @@ describe('BuiltinToolsSettingsManager', () => {
       // First add an override
       const settings = BuiltinToolsSettingsManager.getDefaultSettings();
       settings.toolOverrides['browser_navigate'] = { enabled: false };
-      vi.mocked(fs.existsSync).mockReturnValue(true);
-      vi.mocked(fs.readFileSync).mockReturnValue(JSON.stringify(settings));
+      mockStoredSettings = settings;
       BuiltinToolsSettingsManager.clearCache();
 
       // Then remove it
       BuiltinToolsSettingsManager.setToolOverride('browser_navigate', null);
 
-      const writtenData = vi.mocked(fs.writeFileSync).mock.calls[0][1] as string;
-      const parsed = JSON.parse(writtenData);
-      expect(parsed.toolOverrides['browser_navigate']).toBeUndefined();
+      expect(mockStoredSettings.toolOverrides['browser_navigate']).toBeUndefined();
     });
   });
 
   describe('clearCache', () => {
-    it('should force settings to be reloaded from disk', () => {
-      vi.mocked(fs.existsSync).mockReturnValue(false);
-
+    it('should force settings to be reloaded from storage', () => {
       // First load
       BuiltinToolsSettingsManager.loadSettings();
-      expect(fs.existsSync).toHaveBeenCalledTimes(1);
+      expect(mockRepositoryLoad).toHaveBeenCalledTimes(1);
 
       // Second load (cached)
       BuiltinToolsSettingsManager.loadSettings();
-      expect(fs.existsSync).toHaveBeenCalledTimes(1);
+      expect(mockRepositoryLoad).toHaveBeenCalledTimes(1);
 
       // Clear cache
       BuiltinToolsSettingsManager.clearCache();
 
-      // Third load (should read from disk again)
+      // Third load (should read from storage again)
       BuiltinToolsSettingsManager.loadSettings();
-      expect(fs.existsSync).toHaveBeenCalledTimes(2);
+      expect(mockRepositoryLoad).toHaveBeenCalledTimes(2);
     });
   });
 
@@ -487,14 +455,13 @@ describe('BuiltinToolsSettingsManager', () => {
 describe('Tool Category Mapping Integration', () => {
   beforeEach(() => {
     BuiltinToolsSettingsManager.clearCache();
-    vi.mocked(fs.existsSync).mockReturnValue(false);
+    mockStoredSettings = undefined;
   });
 
   it('should disable all browser tools when browser category is disabled', () => {
     const settings = BuiltinToolsSettingsManager.getDefaultSettings();
     settings.categories.browser.enabled = false;
-    vi.mocked(fs.existsSync).mockReturnValue(true);
-    vi.mocked(fs.readFileSync).mockReturnValue(JSON.stringify(settings));
+    mockStoredSettings = settings;
     BuiltinToolsSettingsManager.clearCache();
 
     const browserTools = BuiltinToolsSettingsManager.getToolsByCategory().browser;
@@ -506,8 +473,7 @@ describe('Tool Category Mapping Integration', () => {
   it('should set all file tools to low priority when file category is low priority', () => {
     const settings = BuiltinToolsSettingsManager.getDefaultSettings();
     settings.categories.file.priority = 'low';
-    vi.mocked(fs.existsSync).mockReturnValue(true);
-    vi.mocked(fs.readFileSync).mockReturnValue(JSON.stringify(settings));
+    mockStoredSettings = settings;
     BuiltinToolsSettingsManager.clearCache();
 
     const fileTools = BuiltinToolsSettingsManager.getToolsByCategory().file;
@@ -521,8 +487,7 @@ describe('Tool Category Mapping Integration', () => {
     settings.categories.browser.enabled = true;
     settings.toolOverrides['browser_navigate'] = { enabled: false };
     settings.toolOverrides['browser_click'] = { enabled: false };
-    vi.mocked(fs.existsSync).mockReturnValue(true);
-    vi.mocked(fs.readFileSync).mockReturnValue(JSON.stringify(settings));
+    mockStoredSettings = settings;
     BuiltinToolsSettingsManager.clearCache();
 
     expect(BuiltinToolsSettingsManager.isToolEnabled('browser_navigate')).toBe(false);

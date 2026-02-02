@@ -150,6 +150,8 @@ const TOOL_CATEGORIES: Record<string, keyof BuiltinToolsSettings['categories']> 
   write_file: 'file',
   copy_file: 'file',
   list_directory: 'file',
+  list_directory_with_sizes: 'file',
+  get_file_info: 'file',
   rename_file: 'file',
   delete_file: 'file',
   create_directory: 'file',
@@ -198,7 +200,6 @@ export class BuiltinToolsSettingsManager {
       const repository = SecureSettingsRepository.getInstance();
 
       if (repository.exists('builtintools')) {
-        console.log('[BuiltinToolsSettings] Settings already in database, skipping migration');
         this.migrationCompleted = true;
         return;
       }

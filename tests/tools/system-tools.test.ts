@@ -7,7 +7,6 @@
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
 import * as os from 'os';
 import * as childProcess from 'child_process';
-import { promisify } from 'util';
 
 // Mock electron modules
 vi.mock('electron', () => ({
@@ -51,9 +50,14 @@ vi.mock('os', async () => {
 });
 
 // Mock child_process
-vi.mock('child_process', () => ({
-  exec: vi.fn(),
-}));
+vi.mock('child_process', async () => {
+  const actual = await vi.importActual<typeof childProcess>('child_process');
+  return {
+    ...actual,
+    exec: vi.fn(),
+    execFile: vi.fn(),
+  };
+});
 
 // Mock fs/promises
 vi.mock('fs/promises', () => ({
@@ -64,6 +68,7 @@ vi.mock('fs/promises', () => ({
 const mockDaemon = {
   logEvent: vi.fn(),
   registerArtifact: vi.fn(),
+  requestApproval: vi.fn().mockResolvedValue(true),
 };
 
 // Mock workspace
@@ -85,14 +90,14 @@ import { Workspace } from '../../src/shared/types';
 
 describe('SystemTools - run_applescript', () => {
   let systemTools: SystemTools;
-  let execMock: ReturnType<typeof vi.fn>;
+  let execFileMock: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
     vi.clearAllMocks();
 
-    // Setup exec mock with promisify support
-    execMock = vi.fn();
-    vi.mocked(childProcess.exec).mockImplementation(execMock);
+    // Setup execFile mock with promisify support
+    execFileMock = vi.fn();
+    vi.mocked(childProcess.execFile).mockImplementation(execFileMock);
 
     // Create SystemTools instance
     systemTools = new SystemTools(
@@ -112,7 +117,8 @@ describe('SystemTools - run_applescript', () => {
       const expectedOutput = 'Documents';
 
       // Mock successful execution
-      execMock.mockImplementation((cmd: string, opts: any, callback?: Function) => {
+      execFileMock.mockImplementation((file: string, args: string[], opts: any, callback?: Function) => {
+        expect(file).toBe('osascript');
         if (callback) {
           callback(null, { stdout: expectedOutput + '\n', stderr: '' });
         }
@@ -137,7 +143,7 @@ describe('SystemTools - run_applescript', () => {
     it('should handle empty output gracefully', async () => {
       const script = 'tell application "System Events" to click button "OK"';
 
-      execMock.mockImplementation((cmd: string, opts: any, callback?: Function) => {
+      execFileMock.mockImplementation((_file: string, _args: string[], _opts: any, callback?: Function) => {
         if (callback) {
           callback(null, { stdout: '', stderr: '' });
         }
@@ -154,7 +160,7 @@ describe('SystemTools - run_applescript', () => {
       const script = 'some script';
       const stderrOutput = 'Script completed';
 
-      execMock.mockImplementation((cmd: string, opts: any, callback?: Function) => {
+      execFileMock.mockImplementation((_file: string, _args: string[], _opts: any, callback?: Function) => {
         if (callback) {
           callback(null, { stdout: '', stderr: stderrOutput + '\n' });
         }
@@ -170,10 +176,10 @@ describe('SystemTools - run_applescript', () => {
     it('should properly escape script for shell execution', async () => {
       const script = 'tell application "Safari" to get URL of front document';
 
-      execMock.mockImplementation((cmd: string, opts: any, callback?: Function) => {
-        // Verify the command contains properly escaped script
-        expect(cmd).toContain('osascript -e');
-        expect(cmd).toContain(JSON.stringify(script));
+      execFileMock.mockImplementation((file: string, args: string[], _opts: any, callback?: Function) => {
+        // Verify the execFile invocation contains proper args
+        expect(file).toBe('osascript');
+        expect(args).toEqual(['-e', script]);
         if (callback) {
           callback(null, { stdout: 'https://example.com\n', stderr: '' });
         }
@@ -226,13 +232,13 @@ describe('SystemTools - run_applescript', () => {
       const script = 'invalid applescript syntax {{{';
 
       const errorMessage = 'syntax error: Expected expression but found unknown token.';
-      execMock.mockImplementation((cmd: string, opts: any, callback?: Function) => {
+      execFileMock.mockImplementation((_file: string, _args: string[], _opts: any, callback?: Function) => {
         const error = new Error('Command failed') as any;
         error.stderr = errorMessage;
         if (callback) {
           callback(error, null);
         }
-        throw error;
+        return undefined;
       });
 
       await expect(systemTools.runAppleScript(script)).rejects.toThrow(
@@ -249,13 +255,13 @@ describe('SystemTools - run_applescript', () => {
       vi.mocked(os.platform).mockReturnValue('darwin');
       const script = 'delay 60';
 
-      execMock.mockImplementation((cmd: string, opts: any, callback?: Function) => {
+      execFileMock.mockImplementation((_file: string, _args: string[], _opts: any, callback?: Function) => {
         const error = new Error('Command timed out') as any;
         error.killed = true;
         if (callback) {
           callback(error, null);
         }
-        throw error;
+        return undefined;
       });
 
       await expect(systemTools.runAppleScript(script)).rejects.toThrow(
@@ -301,7 +307,7 @@ describe('SystemTools - run_applescript', () => {
     it('should log tool_call event with script length', async () => {
       const script = 'tell application "Finder" to activate';
 
-      execMock.mockImplementation((cmd: string, opts: any, callback?: Function) => {
+      execFileMock.mockImplementation((_file: string, _args: string[], _opts: any, callback?: Function) => {
         if (callback) {
           callback(null, { stdout: '', stderr: '' });
         }
@@ -320,7 +326,7 @@ describe('SystemTools - run_applescript', () => {
       const script = 'return "hello"';
       const output = 'hello';
 
-      execMock.mockImplementation((cmd: string, opts: any, callback?: Function) => {
+      execFileMock.mockImplementation((_file: string, _args: string[], _opts: any, callback?: Function) => {
         if (callback) {
           callback(null, { stdout: output, stderr: '' });
         }
@@ -339,12 +345,12 @@ describe('SystemTools - run_applescript', () => {
     it('should log tool_error event on failure', async () => {
       const script = 'invalid';
 
-      execMock.mockImplementation((cmd: string, opts: any, callback?: Function) => {
+      execFileMock.mockImplementation((_file: string, _args: string[], _opts: any, callback?: Function) => {
         const error = new Error('Execution failed');
         if (callback) {
           callback(error, null);
         }
-        throw error;
+        return undefined;
       });
 
       await expect(systemTools.runAppleScript(script)).rejects.toThrow();

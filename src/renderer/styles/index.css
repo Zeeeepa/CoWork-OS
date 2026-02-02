@@ -317,7 +317,8 @@
 
 .theme-light .file-viewer-docx,
 .theme-light .file-viewer-markdown,
-.theme-light .file-viewer-pdf {
+.theme-light .file-viewer-pdf,
+.theme-light .file-viewer-html {
   color: var(--color-text);
 }
 
@@ -10492,6 +10493,16 @@ button {
 .file-viewer-docx th {
   background: var(--color-bg-tertiary);
   font-weight: 600;
+}
+
+/* HTML content */
+.file-viewer-html {
+  width: 100%;
+  height: 100%;
+  min-height: 400px;
+  border: none;
+  background: #fff;
+  border-radius: 4px;
 }
 
 /* PDF content */

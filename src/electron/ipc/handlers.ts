@@ -306,12 +306,13 @@ export async function setupIpcHandlers(
     const fileName = path.basename(resolvedPath);
 
     // Determine file type
-    const getFileType = (ext: string): 'markdown' | 'code' | 'text' | 'docx' | 'pdf' | 'image' | 'pptx' | 'unsupported' => {
-      const codeExtensions = ['.js', '.ts', '.tsx', '.jsx', '.py', '.java', '.go', '.rs', '.c', '.cpp', '.h', '.css', '.scss', '.html', '.xml', '.json', '.yaml', '.yml', '.toml', '.sh', '.bash', '.zsh', '.sql', '.graphql', '.vue', '.svelte', '.rb', '.php', '.swift', '.kt', '.scala'];
+    const getFileType = (ext: string): 'markdown' | 'code' | 'text' | 'docx' | 'pdf' | 'image' | 'pptx' | 'html' | 'unsupported' => {
+      const codeExtensions = ['.js', '.ts', '.tsx', '.jsx', '.py', '.java', '.go', '.rs', '.c', '.cpp', '.h', '.css', '.scss', '.xml', '.json', '.yaml', '.yml', '.toml', '.sh', '.bash', '.zsh', '.sql', '.graphql', '.vue', '.svelte', '.rb', '.php', '.swift', '.kt', '.scala'];
       const textExtensions = ['.txt', '.log', '.csv', '.env', '.gitignore', '.dockerignore', '.editorconfig', '.prettierrc', '.eslintrc'];
       const imageExtensions = ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg', '.bmp', '.ico'];
 
       if (ext === '.md' || ext === '.markdown') return 'markdown';
+      if (ext === '.html' || ext === '.htm') return 'html';
       if (ext === '.docx') return 'docx';
       if (ext === '.pdf') return 'pdf';
       if (ext === '.pptx') return 'pptx';
@@ -376,6 +377,12 @@ export async function setupIpcHandlers(
           };
           const mimeType = mimeTypes[extension] || 'image/png';
           content = `data:${mimeType};base64,${buffer.toString('base64')}`;
+          break;
+        }
+
+        case 'html': {
+          htmlContent = await fs.readFile(resolvedPath, 'utf-8');
+          content = null; // HTML content is in htmlContent
           break;
         }
 

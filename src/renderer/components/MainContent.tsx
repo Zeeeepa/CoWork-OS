@@ -616,10 +616,9 @@ export function MainContent({ task, selectedTaskId, workspace, events, onSendMes
 
   // Filter events based on verbose mode
   const filteredEvents = useMemo(() => {
-    if (verboseSteps) {
-      return events;
-    }
-    return events.filter(isImportantEvent);
+    const visibleEvents = verboseSteps ? events : events.filter(isImportantEvent);
+    // Command output is rendered separately via CommandOutput component
+    return visibleEvents.filter(event => event.type !== 'command_output');
   }, [events, verboseSteps]);
 
   // Find the index where command output should be inserted (after the last event before command started)
@@ -1593,31 +1592,6 @@ export function MainContent({ task, selectedTaskId, workspace, events, onSendMes
       {/* Body */}
       <div className="main-body" ref={mainBodyRef} onScroll={handleScroll}>
         <div className="task-content">
-          {task.status === 'paused' && (
-            <div className="task-status-banner task-status-banner-paused">
-              <div className="task-status-banner-content">
-                <strong>Paused — waiting on your input</strong>
-                {latestPauseEvent?.payload?.message && (
-                  <span className="task-status-banner-detail">{latestPauseEvent.payload.message}</span>
-                )}
-              </div>
-              <button className="btn-secondary" onClick={() => window.electronAPI.resumeTask(task.id)}>
-                Resume
-              </button>
-            </div>
-          )}
-
-          {task.status === 'blocked' && (
-            <div className="task-status-banner task-status-banner-blocked">
-              <div className="task-status-banner-content">
-                <strong>Blocked — needs approval</strong>
-                {latestApprovalEvent?.payload?.approval?.description && (
-                  <span className="task-status-banner-detail">{latestApprovalEvent.payload.approval.description}</span>
-                )}
-              </div>
-            </div>
-          )}
-
           {/* User Prompt - Right aligned like chat */}
           <div className="chat-message user-message">
             <div className="chat-bubble user-bubble markdown-content">
@@ -1874,6 +1848,29 @@ export function MainContent({ task, selectedTaskId, workspace, events, onSendMes
                   <path d="M18 6L6 18M6 6l12 12" />
                 </svg>
               </button>
+            </div>
+          )}
+          {task.status === 'paused' && (
+            <div className="task-status-banner task-status-banner-paused">
+              <div className="task-status-banner-content">
+                <strong>Paused — waiting on your input</strong>
+                {latestPauseEvent?.payload?.message && (
+                  <span className="task-status-banner-detail">{latestPauseEvent.payload.message}</span>
+                )}
+              </div>
+              <button className="btn-secondary" onClick={() => window.electronAPI.resumeTask(task.id)}>
+                Resume
+              </button>
+            </div>
+          )}
+          {task.status === 'blocked' && (
+            <div className="task-status-banner task-status-banner-blocked">
+              <div className="task-status-banner-content">
+                <strong>Blocked — needs approval</strong>
+                {latestApprovalEvent?.payload?.approval?.description && (
+                  <span className="task-status-banner-detail">{latestApprovalEvent.payload.approval.description}</span>
+                )}
+              </div>
             </div>
           )}
           <div className="input-row">

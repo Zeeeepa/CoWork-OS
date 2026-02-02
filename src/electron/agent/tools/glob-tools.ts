@@ -44,7 +44,7 @@ export class GlobTools {
             path: {
               type: 'string',
               description:
-                'Directory to search in (relative to workspace). Defaults to workspace root if not specified.',
+                'Directory to search in (relative to workspace unless absolute path is allowed). Defaults to workspace root if not specified.',
             },
             maxResults: {
               type: 'number',
@@ -79,12 +79,15 @@ export class GlobTools {
     });
 
     try {
+      const normalizedWorkspace = path.resolve(this.workspace.path);
       const basePath = searchPath
-        ? path.resolve(this.workspace.path, searchPath)
-        : this.workspace.path;
+        ? (path.isAbsolute(searchPath)
+            ? path.normalize(searchPath)
+            : path.resolve(normalizedWorkspace, searchPath))
+        : normalizedWorkspace;
 
-      // Validate path is within workspace
-      if (!basePath.startsWith(this.workspace.path)) {
+      const isInsideWorkspace = this.isWithinWorkspace(basePath, normalizedWorkspace);
+      if (!isInsideWorkspace && !this.isPathAllowedOutsideWorkspace(basePath)) {
         throw new Error('Search path must be within workspace');
       }
 
@@ -104,7 +107,7 @@ export class GlobTools {
 
       // Format results
       const results = limitedMatches.map((m) => ({
-        path: path.relative(this.workspace.path, m.path),
+        path: isInsideWorkspace ? path.relative(normalizedWorkspace, m.path) : m.path,
         size: m.size,
         modified: new Date(m.mtime).toISOString(),
       }));
@@ -141,6 +144,28 @@ export class GlobTools {
         error: error.message,
       };
     }
+  }
+
+  private isWithinWorkspace(basePath: string, workspacePath: string): boolean {
+    const relative = path.relative(workspacePath, basePath);
+    return !relative.startsWith('..') && !path.isAbsolute(relative);
+  }
+
+  private isPathAllowedOutsideWorkspace(basePath: string): boolean {
+    if (this.workspace.isTemp) return true;
+    if (this.workspace.permissions.unrestrictedFileAccess) return true;
+
+    const allowedPaths = this.workspace.permissions.allowedPaths;
+    if (!allowedPaths || allowedPaths.length === 0) {
+      return false;
+    }
+
+    const normalizedPath = path.normalize(basePath);
+    return allowedPaths.some(allowed => {
+      const normalizedAllowed = path.normalize(allowed);
+      return normalizedPath === normalizedAllowed ||
+        normalizedPath.startsWith(normalizedAllowed + path.sep);
+    });
   }
 
   /**

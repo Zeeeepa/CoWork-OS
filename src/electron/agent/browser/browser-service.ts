@@ -168,6 +168,7 @@ export class BrowserService {
       // Common consent button selectors and text patterns
       const consentButtonSelectors = [
         // Common button IDs and classes
+        '#L2AGLb', // Google consent "Accept all"
         '#onetrust-accept-btn-handler',
         '#accept-all-cookies',
         '#acceptAllCookies',
@@ -187,6 +188,9 @@ export class BrowserService {
         '[aria-label="Accept all cookies"]',
         '[aria-label="Accept cookies"]',
         '[aria-label="Accept all"]',
+        '[aria-label="Aceitar tudo"]',
+        '[aria-label="Rejeitar tudo"]',
+        '[aria-label="Reject all"]',
         // Data attributes
         '[data-action="accept"]',
         '[data-consent="accept"]',
@@ -226,6 +230,11 @@ export class BrowserService {
         'Consent',
         'Continue',
         'Yes, I agree',
+        'Reject all',
+        'Reject All',
+        'Rejeitar tudo',
+        'Aceitar tudo',
+        'Recusar tudo',
         'Accetto',
         'Akzeptieren',
         'Accepter',
@@ -324,6 +333,14 @@ export class BrowserService {
       width: viewport?.width ?? this.options.viewport!.width,
       height: pageHeight
     };
+  }
+
+  /**
+   * Get the current page URL
+   */
+  async getCurrentUrl(): Promise<string> {
+    await this.ensurePage();
+    return this.page!.url();
   }
 
   /**

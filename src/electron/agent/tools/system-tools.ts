@@ -1,4 +1,4 @@
-import { exec } from 'child_process';
+import { exec, execFile } from 'child_process';
 import { promisify } from 'util';
 import * as os from 'os';
 import * as path from 'path';
@@ -9,6 +9,7 @@ import { AgentDaemon } from '../daemon';
 import { LLMTool } from '../llm/types';
 
 const execAsync = promisify(exec);
+const execFileAsync = promisify(execFile);
 
 const DEFAULT_TIMEOUT = 30 * 1000; // 30 seconds
 
@@ -412,15 +413,42 @@ export class SystemTools {
       throw new Error('AppleScript is only available on macOS');
     }
 
+    const { script: normalizedScript, modified } = this.normalizeAppleScript(script);
+
+    const approved = await this.daemon.requestApproval(
+      this.taskId,
+      'run_applescript',
+      'Run AppleScript',
+      {
+        script: normalizedScript,
+        scriptLength: normalizedScript.length,
+        normalized: modified,
+      }
+    );
+
+    if (!approved) {
+      throw new Error('User denied AppleScript execution');
+    }
+
     this.daemon.logEvent(this.taskId, 'tool_call', {
       tool: 'run_applescript',
-      scriptLength: script.length,
+      scriptLength: normalizedScript.length,
     });
 
     try {
-      // Execute using osascript command
-      // Use -e flag for inline script execution
-      const { stdout, stderr } = await execAsync(`osascript -e ${JSON.stringify(script)}`, {
+      // Execute using osascript with multiple -e args (more robust than shell quoting)
+      const lines = normalizedScript
+        .split(/\r?\n/)
+        .map(line => line.trim())
+        .filter(line => line.length > 0);
+
+      if (lines.length === 0) {
+        throw new Error('AppleScript is empty after normalization');
+      }
+
+      const args = lines.flatMap(line => ['-e', line]);
+
+      const { stdout, stderr } = await execFileAsync('osascript', args, {
         timeout: DEFAULT_TIMEOUT,
         maxBuffer: 1024 * 1024, // 1MB buffer
       });
@@ -447,6 +475,39 @@ export class SystemTools {
       const errorMessage = error.stderr?.trim() || error.message || 'Unknown error';
       throw new Error(`AppleScript execution failed: ${errorMessage}`);
     }
+  }
+
+  /**
+   * Normalize AppleScript input for safer execution
+   */
+  private normalizeAppleScript(input: string): { script: string; modified: boolean } {
+    let script = input;
+    let modified = false;
+
+    // Strip fenced code blocks if present
+    const fencedMatch = script.match(/```(?:applescript)?\s*([\s\S]*?)\s*```/i);
+    if (fencedMatch) {
+      script = fencedMatch[1];
+      modified = true;
+    }
+
+    // Replace smart quotes with straight quotes
+    const replaced = script
+      .replace(/[\u201C\u201D]/g, '"')
+      .replace(/[\u2018\u2019]/g, "'");
+    if (replaced !== script) {
+      script = replaced;
+      modified = true;
+    }
+
+    // Remove non-breaking spaces
+    const cleaned = script.replace(/\u00A0/g, ' ');
+    if (cleaned !== script) {
+      script = cleaned;
+      modified = true;
+    }
+
+    return { script: script.trim(), modified };
   }
 
   /**

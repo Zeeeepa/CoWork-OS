@@ -74,6 +74,7 @@ export type EventType =
   | 'task_cancelled'
   | 'task_paused'
   | 'task_resumed'
+  | 'task_status'
   | 'task_queued'
   | 'task_dequeued'
   | 'queue_updated'

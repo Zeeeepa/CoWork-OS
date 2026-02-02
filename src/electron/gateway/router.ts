@@ -38,6 +38,15 @@ import { LLMProviderFactory, LLMSettings } from '../agent/llm/provider-factory';
 import { ModelKey, LLMProviderType } from '../agent/llm/types';
 import { getCustomSkillLoader } from '../agent/custom-skill-loader';
 import { app } from 'electron';
+import { getVoiceService } from '../voice/VoiceService';
+import { PersonalityManager } from '../settings/personality-manager';
+import {
+  getChannelMessage,
+  getCompletionMessage,
+  DEFAULT_CHANNEL_CONTEXT,
+  type ChannelMessageContext,
+} from '../../shared/channelMessages';
+import { DEFAULT_QUIRKS } from '../../shared/types';
 
 export interface RouterConfig {
   /** Default workspace ID to use for new sessions */
@@ -133,20 +142,55 @@ export class MessageRouter {
   }
 
   /**
+   * Get the channel message context from personality settings
+   */
+  private getMessageContext(): ChannelMessageContext {
+    try {
+      if (PersonalityManager.isInitialized()) {
+        const settings = PersonalityManager.loadSettings();
+        return {
+          agentName: settings.agentName || 'CoWork',
+          userName: settings.relationship?.userName,
+          personality: settings.activePersonality || 'professional',
+          emojiUsage: settings.responseStyle?.emojiUsage || 'minimal',
+          quirks: settings.quirks || DEFAULT_QUIRKS,
+        };
+      }
+    } catch (error) {
+      console.error('[MessageRouter] Failed to load personality settings:', error);
+    }
+    return DEFAULT_CHANNEL_CONTEXT;
+  }
+
+  /**
    * Get or create the temp workspace for sessions without a workspace
    */
   private getOrCreateTempWorkspace(): Workspace {
     // Check if temp workspace exists
     const existing = this.workspaceRepo.findById(TEMP_WORKSPACE_ID);
     if (existing) {
+      const updatedPermissions = {
+        ...existing.permissions,
+        read: true,
+        write: true,
+        delete: true,
+        network: true,
+        shell: existing.permissions.shell ?? false,
+        unrestrictedFileAccess: true,
+      };
+
+      if (!existing.permissions.unrestrictedFileAccess) {
+        this.workspaceRepo.updatePermissions(existing.id, updatedPermissions);
+      }
+
       // Verify directory exists
       if (fs.existsSync(existing.path)) {
-        return { ...existing, isTemp: true };
+        return { ...existing, permissions: updatedPermissions, isTemp: true };
       }
       // Directory was deleted, recreate it
       const tempDir = path.join(os.tmpdir(), 'cowork-os-temp');
       fs.mkdirSync(tempDir, { recursive: true });
-      return { ...existing, isTemp: true };
+      return { ...existing, permissions: updatedPermissions, isTemp: true };
     }
 
     // Create temp directory
@@ -165,6 +209,7 @@ export class MessageRouter {
         delete: true,
         network: true,
         shell: false,
+        unrestrictedFileAccess: true,
       },
       isTemp: true,
     };
@@ -330,6 +375,132 @@ export class MessageRouter {
   // Private methods
 
   /**
+   * Transcribe audio attachments in a message
+   * Downloads audio from URL or uses buffer, transcribes via VoiceService
+   * Saves audio file to a temp folder for transcription and sets message text to include full transcript with context
+   */
+  private async transcribeAudioAttachments(message: IncomingMessage, workspacePath?: string): Promise<void> {
+    if (!message.attachments || message.attachments.length === 0) {
+      return;
+    }
+
+    const audioAttachments = message.attachments.filter(a => a.type === 'audio');
+    if (audioAttachments.length === 0) {
+      return;
+    }
+
+    const voiceService = getVoiceService();
+
+    // Check if transcription is available
+    if (!voiceService.isTranscriptionAvailable()) {
+      console.log('[Router] Audio transcription not available - no STT provider configured');
+      // Add placeholder for audio messages
+      for (const attachment of audioAttachments) {
+        const fileName = attachment.fileName || 'voice message';
+        message.text += message.text ? `\n[Audio: ${fileName} - transcription unavailable]` : `[Audio: ${fileName} - transcription unavailable]`;
+      }
+      return;
+    }
+
+    console.log(`[Router] Transcribing ${audioAttachments.length} audio attachment(s)...`);
+
+    for (const attachment of audioAttachments) {
+      let savedAudioPath: string | undefined;
+      try {
+        let audioBuffer: Buffer | undefined;
+
+        // Get audio data from buffer or file
+        if (attachment.data) {
+          audioBuffer = attachment.data;
+        } else if (attachment.url) {
+          // Check if it's a local file path
+          if (attachment.url.startsWith('/') || attachment.url.startsWith('file://')) {
+            const filePath = attachment.url.replace('file://', '');
+            if (fs.existsSync(filePath)) {
+              audioBuffer = fs.readFileSync(filePath);
+            }
+          } else if (attachment.url.startsWith('http')) {
+            // Download from URL
+            try {
+              const response = await fetch(attachment.url);
+              if (response.ok) {
+                const arrayBuffer = await response.arrayBuffer();
+                audioBuffer = Buffer.from(arrayBuffer);
+              }
+            } catch (fetchError) {
+              console.error('[Router] Failed to download audio:', fetchError);
+            }
+          }
+        }
+
+        if (!audioBuffer || audioBuffer.length === 0) {
+          console.log('[Router] No audio data available for transcription');
+          const fileName = attachment.fileName || 'voice message';
+          message.text += message.text ? `\n[Audio: ${fileName} - could not load]` : `[Audio: ${fileName} - could not load]`;
+          continue;
+        }
+
+        // Save audio file to temp directory for transcription
+        try {
+          const tempDir = path.join(os.tmpdir(), 'cowork-audio');
+          if (!fs.existsSync(tempDir)) {
+            fs.mkdirSync(tempDir, { recursive: true });
+          }
+          const audioFileName = attachment.fileName || `voice_message_${Date.now()}.ogg`;
+          savedAudioPath = path.join(tempDir, audioFileName);
+          fs.writeFileSync(savedAudioPath, audioBuffer);
+          console.log(`[Router] Saved audio file to: ${savedAudioPath}`);
+        } catch (saveError) {
+          console.error('[Router] Failed to save audio file:', saveError);
+        }
+
+        // Transcribe the audio
+        const transcript = await voiceService.transcribe(audioBuffer, { force: true });
+
+        if (transcript && transcript.trim()) {
+          console.log(`[Router] Transcribed audio: "${transcript.substring(0, 100)}${transcript.length > 100 ? '...' : ''}"`);
+
+          // Create a structured message with the full transcript
+          // This ensures the agent knows it's a voice message and has the complete transcript
+          const voiceMessageContext = [
+            '📢 **Voice Message Received**',
+            '',
+            'The user sent a voice message. Here is the complete transcription:',
+            '',
+            '---',
+            transcript,
+            '---',
+            '',
+            'Please respond to the user\'s voice message above.',
+          ].filter(line => line !== undefined).join('\n');
+
+          // Append or set the transcribed text with context
+          if (message.text && message.text.trim()) {
+            message.text += `\n\n${voiceMessageContext}`;
+          } else {
+            message.text = voiceMessageContext;
+          }
+        } else {
+          const fileName = attachment.fileName || 'voice message';
+          message.text += message.text ? `\n[Audio: ${fileName} - no speech detected]` : `[Audio: ${fileName} - no speech detected]`;
+        }
+      } catch (error) {
+        console.error('[Router] Failed to transcribe audio:', error);
+        const fileName = attachment.fileName || 'voice message';
+        message.text += message.text ? `\n[Audio: ${fileName} - transcription failed]` : `[Audio: ${fileName} - transcription failed]`;
+      } finally {
+        if (savedAudioPath && fs.existsSync(savedAudioPath)) {
+          try {
+            fs.unlinkSync(savedAudioPath);
+          } catch (cleanupError) {
+            console.error('[Router] Failed to delete temp audio file:', cleanupError);
+          }
+        }
+      }
+    }
+  }
+
+  /**
    * Handle an incoming message
    */
   private async handleMessage(adapter: ChannelAdapter, message: IncomingMessage): Promise<void> {
@@ -340,6 +511,9 @@ export class MessageRouter {
       console.error(`No channel configuration found for ${channelType}`);
       return;
     }
+
+    // Transcribe any audio attachments before processing
+    await this.transcribeAudioAttachments(message);
 
     // Log incoming message
     this.messageRepo.create({
@@ -1803,19 +1977,10 @@ export class MessageRouter {
     if (!pending) return;
 
     try {
-      // WhatsApp/iMessage-optimized completion message
+      // WhatsApp/iMessage-optimized completion message (no follow-up hint)
       const isSimpleMessaging = pending.adapter.type === 'whatsapp' || pending.adapter.type === 'imessage';
-      let message: string;
-
-      if (isSimpleMessaging) {
-        message = result
-          ? `✅ Done!\n\n${result}`
-          : '✅ Done!';
-      } else {
-        message = result
-          ? `✅ Task Done!\n\n${result}\n\n💡 Send a follow-up message to continue, or use /newtask to start fresh.`
-          : '✅ Task Done!\n\n💡 Send a follow-up message to continue, or use /newtask to start fresh.';
-      }
+      const msgCtx = this.getMessageContext();
+      const message = getCompletionMessage(msgCtx, result, !isSimpleMessaging);
 
       // Finalize draft stream if using Telegram
       if (pending.adapter instanceof TelegramAdapter) {
@@ -1924,9 +2089,10 @@ export class MessageRouter {
         }
       }
 
+      const message = getChannelMessage('taskFailed', this.getMessageContext(), { error });
       await pending.adapter.sendMessage({
         chatId: pending.chatId,
-        text: `❌ Task failed: ${error}`,
+        text: message,
       });
 
       // Unlink session from task

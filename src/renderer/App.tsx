@@ -4,7 +4,7 @@ import { MainContent } from './components/MainContent';
 import { RightPanel } from './components/RightPanel';
 import { Settings } from './components/Settings';
 import { DisclaimerModal } from './components/DisclaimerModal';
-import { OnboardingModal } from './components/OnboardingModal';
+import { Onboarding } from './components/Onboarding';
 // TaskQueuePanel moved to RightPanel
 import { ToastContainer } from './components/Toast';
 import { QuickTaskFAB } from './components/QuickTaskFAB';
@@ -27,7 +27,7 @@ export function App() {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [currentView, setCurrentView] = useState<AppView>('main');
-  const [settingsTab, setSettingsTab] = useState<'appearance' | 'llm' | 'search' | 'telegram' | 'discord' | 'updates' | 'guardrails' | 'queue' | 'skills' | 'scheduled'>('appearance');
+  const [settingsTab, setSettingsTab] = useState<'appearance' | 'llm' | 'search' | 'telegram' | 'slack' | 'whatsapp' | 'teams' | 'morechannels' | 'updates' | 'guardrails' | 'queue' | 'skills' | 'scheduled' | 'voice'>('appearance');
   const [events, setEvents] = useState<TaskEvent[]>([]);
 
   // Model selection state
@@ -307,7 +307,10 @@ export function App() {
         'step_started': 'executing',
         'step_completed': 'executing',
         'task_completed': 'completed',
-        'follow_up_completed': 'completed',
+        'task_paused': 'paused',
+        'approval_requested': 'blocked',
+        'approval_granted': 'executing',
+        'approval_denied': 'failed',
         'error': 'failed',
         'task_cancelled': 'cancelled',
       };
@@ -320,11 +323,15 @@ export function App() {
         return;
       }
 
-      const newStatus = statusMap[event.type];
+      const newStatus = event.type === 'task_status' ? event.payload?.status : statusMap[event.type];
       if (newStatus) {
         setTasks(prev => prev.map(t =>
           t.id === event.taskId ? { ...t, status: newStatus } : t
         ));
+      }
+
+      if (event.type === 'approval_granted') {
+        void window.electronAPI.resumeTask(event.taskId);
       }
 
       // Show toast notifications for task completion/failure
@@ -536,18 +543,11 @@ export function App() {
     );
   }
 
-  // Show onboarding modal after disclaimer is accepted but before main app
+  // Show cinematic onboarding after disclaimer is accepted but before main app
   if (!onboardingCompleted) {
     return (
       <div className="app">
-        <div className="title-bar" />
-        <OnboardingModal
-          onComplete={handleOnboardingComplete}
-          themeMode={themeMode}
-          accentColor={accentColor}
-          onThemeChange={handleThemeChange}
-          onAccentChange={handleAccentChange}
-        />
+        <Onboarding onComplete={handleOnboardingComplete} />
       </div>
     );
   }
