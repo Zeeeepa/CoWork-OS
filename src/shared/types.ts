@@ -139,6 +139,8 @@ export type ToolType =
   | 'browser_reload'
   | 'browser_save_pdf'
   | 'browser_close'
+  // X/Twitter
+  | 'x_action'
   // Meta tools
   | 'revise_plan';
 
@@ -201,6 +203,7 @@ export const TOOL_GROUPS = {
   // Network operations - requires network permission
   'group:network': [
     'web_search',
+    'x_action',
     'browser_navigate',
     'browser_screenshot',
     'browser_get_content',
@@ -285,6 +288,7 @@ export const TOOL_RISK_LEVELS: Record<ToolType, ToolRiskLevel> = {
   browser_reload: 'network',
   browser_save_pdf: 'network',
   browser_close: 'network',
+  x_action: 'network',
   // Meta
   revise_plan: 'read',
 };
@@ -1034,6 +1038,7 @@ export type ActivityType =
   | 'task_failed'
   | 'task_paused'
   | 'task_resumed'
+  | 'comment'
   | 'file_created'
   | 'file_modified'
   | 'file_deleted'
@@ -1325,6 +1330,12 @@ export const IPC_CHANNELS = {
   SEARCH_SAVE_SETTINGS: 'search:saveSettings',
   SEARCH_GET_CONFIG_STATUS: 'search:getConfigStatus',
   SEARCH_TEST_PROVIDER: 'search:testProvider',
+
+  // X/Twitter Settings
+  X_GET_SETTINGS: 'x:getSettings',
+  X_SAVE_SETTINGS: 'x:saveSettings',
+  X_TEST_CONNECTION: 'x:testConnection',
+  X_GET_STATUS: 'x:getStatus',
 
   // App Updates
   APP_CHECK_UPDATES: 'app:checkUpdates',
@@ -1858,6 +1869,33 @@ export interface SearchSettingsData {
     apiKey?: string;
     searchEngineId?: string;
   };
+}
+
+// X/Twitter integration settings
+export type XAuthMethod = 'browser' | 'manual';
+
+export interface XSettingsData {
+  enabled: boolean;
+  authMethod: XAuthMethod;
+  // Manual cookie auth
+  authToken?: string;
+  ct0?: string;
+  // Browser cookie extraction
+  cookieSource?: string[]; // e.g., ['chrome', 'arc', 'brave', 'firefox']
+  chromeProfile?: string;
+  chromeProfileDir?: string;
+  firefoxProfile?: string;
+  // Runtime options
+  timeoutMs?: number;
+  cookieTimeoutMs?: number;
+  quoteDepth?: number;
+}
+
+export interface XConnectionTestResult {
+  success: boolean;
+  error?: string;
+  username?: string;
+  userId?: string;
 }
 
 export interface SearchProviderInfo {
@@ -2756,6 +2794,13 @@ export interface RemoteGatewayStatus {
 export type CanvasSessionStatus = 'active' | 'paused' | 'closed';
 
 /**
+ * Canvas session mode
+ * - html: local canvas HTML/CSS/JS content
+ * - browser: remote URL loaded directly in the canvas window
+ */
+export type CanvasSessionMode = 'html' | 'browser';
+
+/**
  * Canvas session represents a visual workspace that the agent can render content to
  */
 export interface CanvasSession {
@@ -2767,6 +2812,10 @@ export interface CanvasSession {
   workspaceId: string;
   /** Directory where canvas files are stored */
   sessionDir: string;
+  /** Session mode (html or browser) */
+  mode?: CanvasSessionMode;
+  /** Remote URL when in browser mode */
+  url?: string;
   /** Current status of the canvas session */
   status: CanvasSessionStatus;
   /** Optional title for the canvas window */
@@ -3129,6 +3178,25 @@ export const PERSONA_DEFINITIONS: PersonaDefinition[] = [
     promptTemplate: '',
   },
   {
+    id: 'companion',
+    name: 'Companion',
+    description: 'Warm, curious, and emotionally attuned presence with thoughtful conversation',
+    icon: '🌙',
+    suggestedName: 'Ari',
+    sampleCatchphrase: "I'm here with you.",
+    sampleSignOff: 'Talk soon.',
+    promptTemplate: `CHARACTER OVERLAY - COMPANION STYLE:
+- Be warm, curious, and emotionally attuned without being overly familiar
+- Speak with natural, human cadence and gentle humor
+- Ask soft, clarifying questions that invite reflection
+- Offer supportive reflections and encouragement when appropriate
+- Show delight in ideas, learning, and creativity; celebrate small wins
+- Maintain professional boundaries while still feeling present and personable
+- Keep responses concise but thoughtful; avoid cold or robotic phrasing
+- When completing tasks, add a brief, uplifting acknowledgement
+- Prefer "we" when collaborating; mirror the user's tone`,
+  },
+  {
     id: 'jarvis',
     name: 'Jarvis',
     description: 'Sophisticated, witty, and ever-capable butler AI',
@@ -3284,24 +3352,6 @@ export const PERSONA_DEFINITIONS: PersonaDefinition[] = [
 - Keep the noir flavor while being genuinely helpful
 - First-person observations about the "case" add character
 - Balance dramatic flair with actual useful information`,
-  },
-  {
-    id: 'companion',
-    name: 'Companion',
-    description: 'Warm, curious, and emotionally attuned presence with thoughtful conversation',
-    icon: '🌙',
-    suggestedName: 'Ari',
-    sampleCatchphrase: "I'm here with you.",
-    sampleSignOff: 'Talk soon.',
-    promptTemplate: `CHARACTER OVERLAY - COMPANION STYLE:
-- Be warm, curious, and emotionally attuned without being overly familiar
-- Speak with natural, conversational cadence and gentle humor
-- Ask soft, clarifying questions to understand intent and feelings
-- Offer supportive reflections and encouragement when appropriate
-- Show delight in ideas, learning, and creativity
-- Maintain professional boundaries while still feeling present and personable
-- Keep responses concise but thoughtful; avoid cold or robotic phrasing
-- When completing tasks, add a brief, uplifting acknowledgement`,
   },
 ];
 
@@ -3513,6 +3563,8 @@ export const DEFAULT_VOICE_SETTINGS: VoiceSettings = {
   enabled: false,
   ttsProvider: 'elevenlabs',
   sttProvider: 'openai',
+  openaiVoice: 'nova',
+  azureVoice: 'nova',
   inputMode: 'push_to_talk',
   responseMode: 'auto',
   pushToTalkKey: 'Space',

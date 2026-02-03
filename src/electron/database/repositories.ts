@@ -264,6 +264,22 @@ export class TaskRepository {
       const deleteApprovals = this.db.prepare('DELETE FROM approvals WHERE task_id = ?');
       deleteApprovals.run(taskId);
 
+      // Delete activity feed entries for this task
+      const deleteActivities = this.db.prepare('DELETE FROM activity_feed WHERE task_id = ?');
+      deleteActivities.run(taskId);
+
+      // Delete agent mentions for this task
+      const deleteMentions = this.db.prepare('DELETE FROM agent_mentions WHERE task_id = ?');
+      deleteMentions.run(taskId);
+
+      // Delete working state entries for this task
+      const deleteWorkingState = this.db.prepare('DELETE FROM agent_working_state WHERE task_id = ?');
+      deleteWorkingState.run(taskId);
+
+      // Nullify task_id in memories rather than deleting them
+      const clearMemoryTaskId = this.db.prepare('UPDATE memories SET task_id = NULL WHERE task_id = ?');
+      clearMemoryTaskId.run(taskId);
+
       // Nullify task_id in channel_sessions rather than deleting the session
       const clearSessionTaskId = this.db.prepare('UPDATE channel_sessions SET task_id = NULL WHERE task_id = ?');
       clearSessionTaskId.run(taskId);

@@ -55,6 +55,11 @@ const IPC_CHANNELS = {
   SEARCH_SAVE_SETTINGS: 'search:saveSettings',
   SEARCH_GET_CONFIG_STATUS: 'search:getConfigStatus',
   SEARCH_TEST_PROVIDER: 'search:testProvider',
+  // X/Twitter Settings
+  X_GET_SETTINGS: 'x:getSettings',
+  X_SAVE_SETTINGS: 'x:saveSettings',
+  X_TEST_CONNECTION: 'x:testConnection',
+  X_GET_STATUS: 'x:getStatus',
   // App Updates
   APP_CHECK_UPDATES: 'app:checkUpdates',
   APP_DOWNLOAD_UPDATE: 'app:downloadUpdate',
@@ -1134,6 +1139,7 @@ type ActivityType =
   | 'task_failed'
   | 'task_paused'
   | 'task_resumed'
+  | 'comment'
   | 'file_created'
   | 'file_modified'
   | 'file_deleted'
@@ -1495,6 +1501,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
   saveSearchSettings: (settings: any) => ipcRenderer.invoke(IPC_CHANNELS.SEARCH_SAVE_SETTINGS, settings),
   getSearchConfigStatus: () => ipcRenderer.invoke(IPC_CHANNELS.SEARCH_GET_CONFIG_STATUS),
   testSearchProvider: (providerType: string) => ipcRenderer.invoke(IPC_CHANNELS.SEARCH_TEST_PROVIDER, providerType),
+
+  // X/Twitter Settings APIs
+  getXSettings: () => ipcRenderer.invoke(IPC_CHANNELS.X_GET_SETTINGS),
+  saveXSettings: (settings: any) => ipcRenderer.invoke(IPC_CHANNELS.X_SAVE_SETTINGS, settings),
+  testXConnection: () => ipcRenderer.invoke(IPC_CHANNELS.X_TEST_CONNECTION),
+  getXStatus: () => ipcRenderer.invoke(IPC_CHANNELS.X_GET_STATUS),
 
   // App Update APIs
   getAppVersion: () => ipcRenderer.invoke(IPC_CHANNELS.APP_GET_VERSION),
@@ -2221,6 +2233,23 @@ export interface ElectronAPI {
     isConfigured: boolean;
   }>;
   testSearchProvider: (providerType: string) => Promise<{ success: boolean; error?: string }>;
+  // X/Twitter Settings
+  getXSettings: () => Promise<{
+    enabled: boolean;
+    authMethod: 'browser' | 'manual';
+    authToken?: string;
+    ct0?: string;
+    cookieSource?: string[];
+    chromeProfile?: string;
+    chromeProfileDir?: string;
+    firefoxProfile?: string;
+    timeoutMs?: number;
+    cookieTimeoutMs?: number;
+    quoteDepth?: number;
+  }>;
+  saveXSettings: (settings: any) => Promise<{ success: boolean }>;
+  testXConnection: () => Promise<{ success: boolean; error?: string; username?: string; userId?: string }>;
+  getXStatus: () => Promise<{ installed: boolean; connected: boolean; username?: string; error?: string }>;
   // App Updates
   getAppVersion: () => Promise<{
     version: string;

@@ -48,7 +48,8 @@ export type SettingsCategory =
   | 'tailscale'
   | 'claude-auth'
   | 'queue'
-  | 'tray';
+  | 'tray'
+  | 'x';
 
 interface SecureSettingsRow {
   id: string;

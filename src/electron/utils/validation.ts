@@ -147,6 +147,22 @@ export const SearchSettingsSchema = z.object({
   }).optional(),
 });
 
+// ============ X/Twitter Settings Schema ============
+
+export const XSettingsSchema = z.object({
+  enabled: z.boolean().default(false),
+  authMethod: z.enum(['browser', 'manual']).default('browser'),
+  authToken: z.string().max(2000).optional(),
+  ct0: z.string().max(2000).optional(),
+  cookieSource: z.array(z.string().max(50)).max(10).optional(),
+  chromeProfile: z.string().max(200).optional(),
+  chromeProfileDir: z.string().max(MAX_PATH_LENGTH).optional(),
+  firefoxProfile: z.string().max(200).optional(),
+  timeoutMs: z.number().int().min(1000).max(120000).optional(),
+  cookieTimeoutMs: z.number().int().min(1000).max(120000).optional(),
+  quoteDepth: z.number().int().min(0).max(5).optional(),
+});
+
 // ============ Guardrail Settings Schema ============
 
 export const GuardrailSettingsSchema = z.object({

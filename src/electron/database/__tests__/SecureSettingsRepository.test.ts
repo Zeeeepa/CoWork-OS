@@ -548,6 +548,7 @@ describe('SecureSettingsRepository', () => {
       'builtintools',
       'tailscale',
       'claude-auth',
+      'x',
     ];
 
     beforeEach(() => {
