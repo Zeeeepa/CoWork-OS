@@ -15,7 +15,7 @@ import {
 export class OpenRouterProvider implements LLMProvider {
   readonly type = 'openrouter' as const;
   private apiKey: string;
-  private baseUrl = 'https://openrouter.ai/api/v1';
+  private baseUrl: string;
   private defaultModel: string;
 
   constructor(config: LLMProviderConfig) {
@@ -25,6 +25,7 @@ export class OpenRouterProvider implements LLMProvider {
     }
 
     this.apiKey = apiKey;
+    this.baseUrl = config.openrouterBaseUrl || 'https://openrouter.ai/api/v1';
     this.defaultModel = config.model || 'anthropic/claude-3.5-sonnet';
   }
 

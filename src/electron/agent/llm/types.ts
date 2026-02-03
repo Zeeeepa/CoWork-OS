@@ -3,7 +3,9 @@
  * Allows switching between Anthropic API and AWS Bedrock
  */
 
-export type LLMProviderType = 'anthropic' | 'bedrock' | 'ollama' | 'gemini' | 'openrouter' | 'openai';
+import type { LLMProviderType } from '../../../shared/types';
+
+export type { LLMProviderType };
 
 export interface LLMProviderConfig {
   type: LLMProviderType;
@@ -24,11 +26,24 @@ export interface LLMProviderConfig {
   geminiApiKey?: string;
   // OpenRouter-specific
   openrouterApiKey?: string;
+  openrouterBaseUrl?: string;
   // OpenAI-specific
   openaiApiKey?: string;
   openaiAccessToken?: string; // OAuth access token
   openaiRefreshToken?: string; // OAuth refresh token
   openaiTokenExpiresAt?: number; // OAuth token expiry timestamp
+  // Groq-specific
+  groqApiKey?: string;
+  groqBaseUrl?: string;
+  // xAI-specific
+  xaiApiKey?: string;
+  xaiBaseUrl?: string;
+  // Kimi-specific
+  kimiApiKey?: string;
+  kimiBaseUrl?: string;
+  // Generic provider support
+  providerApiKey?: string;
+  providerBaseUrl?: string;
 }
 
 export interface LLMTool {
@@ -266,6 +281,80 @@ export const OPENAI_MODELS = {
 } as const;
 
 export type OpenAIModelKey = keyof typeof OPENAI_MODELS;
+
+/**
+ * Popular Groq models
+ */
+export const GROQ_MODELS = {
+  'llama-3.1-8b-instant': {
+    id: 'llama-3.1-8b-instant',
+    displayName: 'Llama 3.1 8B Instant',
+    description: 'Fast, cost-efficient Groq model',
+  },
+  'llama-3.3-70b-versatile': {
+    id: 'llama-3.3-70b-versatile',
+    displayName: 'Llama 3.3 70B Versatile',
+    description: 'Higher capability Groq model',
+  },
+} as const;
+
+export type GroqModelKey = keyof typeof GROQ_MODELS;
+
+/**
+ * Popular xAI (Grok) models
+ */
+export const XAI_MODELS = {
+  'grok-4': {
+    id: 'grok-4',
+    displayName: 'Grok 4',
+    description: 'Flagship model',
+  },
+  'grok-4-fast-non-reasoning': {
+    id: 'grok-4-fast-non-reasoning',
+    displayName: 'Grok 4 Fast (Non-Reasoning)',
+    description: 'Fast responses without explicit reasoning',
+  },
+  'grok-4-fast-reasoning': {
+    id: 'grok-4-fast-reasoning',
+    displayName: 'Grok 4 Fast (Reasoning)',
+    description: 'Faster model with reasoning support',
+  },
+} as const;
+
+export type XAIModelKey = keyof typeof XAI_MODELS;
+
+/**
+ * Kimi (Moonshot) models
+ */
+export const KIMI_MODELS = {
+  'kimi-k2.5': {
+    id: 'kimi-k2.5',
+    displayName: 'Kimi K2.5',
+    description: 'Latest Kimi K2.5 model',
+  },
+  'kimi-k2-0905-preview': {
+    id: 'kimi-k2-0905-preview',
+    displayName: 'Kimi K2.5 Preview',
+    description: 'Preview K2.5 model',
+  },
+  'kimi-k2-turbo-preview': {
+    id: 'kimi-k2-turbo-preview',
+    displayName: 'Kimi K2 Turbo (Preview)',
+    description: 'Faster K2 preview model',
+  },
+  'kimi-k2-thinking': {
+    id: 'kimi-k2-thinking',
+    displayName: 'Kimi K2 Thinking',
+    description: 'Reasoning-focused K2 model',
+  },
+  'kimi-k2-thinking-turbo': {
+    id: 'kimi-k2-thinking-turbo',
+    displayName: 'Kimi K2 Thinking Turbo',
+    description: 'Faster reasoning K2 model',
+  },
+} as const;
+
+export type KimiModelKey = keyof typeof KIMI_MODELS;
 
 /**
  * Popular Ollama models with their details

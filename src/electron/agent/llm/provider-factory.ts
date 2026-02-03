@@ -16,11 +16,114 @@ import { OllamaProvider } from './ollama-provider';
 import { GeminiProvider } from './gemini-provider';
 import { OpenRouterProvider } from './openrouter-provider';
 import { OpenAIProvider } from './openai-provider';
+import { GroqProvider } from './groq-provider';
+import { XAIProvider } from './xai-provider';
+import { KimiProvider } from './kimi-provider';
+import { AnthropicCompatibleProvider } from './anthropic-compatible-provider';
+import { OpenAICompatibleProvider } from './openai-compatible-provider';
+import { GitHubCopilotProvider } from './github-copilot-provider';
 import { SecureSettingsRepository } from '../../database/SecureSettingsRepository';
+import {
+  CUSTOM_PROVIDER_CATALOG,
+  CUSTOM_PROVIDER_MAP,
+  CUSTOM_PROVIDER_IDS,
+  type ProviderCatalogEntry,
+} from '../../../shared/llm-provider-catalog';
+import type { CustomProviderConfig } from '../../../shared/types';
 
 const LEGACY_SETTINGS_FILE = 'llm-settings.json';
 const MASKED_VALUE = '***configured***';
 const ENCRYPTED_PREFIX = 'encrypted:';
+const CUSTOM_PROVIDER_ALIASES: Partial<Record<LLMProviderType, LLMProviderType>> = {
+  'kimi-coding': 'kimi-code',
+};
+
+function resolveCustomProviderId(providerType: LLMProviderType): LLMProviderType {
+  return CUSTOM_PROVIDER_ALIASES[providerType] || providerType;
+}
+
+function getCustomProviderEntry(providerType: LLMProviderType): ProviderCatalogEntry | undefined {
+  return CUSTOM_PROVIDER_MAP.get(resolveCustomProviderId(providerType));
+}
+
+function getCustomProviderConfig(
+  customProviders: Record<string, CustomProviderConfig> | undefined,
+  providerType: LLMProviderType
+): CustomProviderConfig | undefined {
+  if (!customProviders) return undefined;
+  const resolved = resolveCustomProviderId(providerType);
+  const resolvedConfig = customProviders[resolved];
+  if (resolvedConfig) {
+    return resolvedConfig;
+  }
+  const fallbackConfig = customProviders[providerType];
+  if (fallbackConfig && resolved !== providerType) {
+    console.log(`[LLMProviderFactory] Custom provider config not found for "${resolved}", falling back to "${providerType}".`);
+  }
+  return fallbackConfig;
+}
+
+function isCustomProviderConfigured(
+  entry: ProviderCatalogEntry,
+  config?: CustomProviderConfig
+): boolean {
+  if (!config) return false;
+  const hasApiKey = !!config.apiKey?.trim();
+  const hasBaseUrl = !!config.baseUrl?.trim() || !!entry.baseUrl;
+  const hasUserConfig = hasApiKey || !!config.baseUrl?.trim() || !!config.model?.trim();
+
+  if (!hasUserConfig) return false;
+
+  if (entry.apiKeyOptional) {
+    return entry.requiresBaseUrl ? hasBaseUrl : hasApiKey || hasBaseUrl;
+  }
+
+  return entry.requiresBaseUrl ? hasApiKey && hasBaseUrl : hasApiKey;
+}
+
+function createCustomProvider(
+  config: LLMProviderConfig,
+  entry: ProviderCatalogEntry,
+  resolvedType: LLMProviderType
+): LLMProvider {
+  if (resolvedType === 'github-copilot') {
+    return new GitHubCopilotProvider(config);
+  }
+
+  const apiKey = config.providerApiKey || '';
+  const baseUrl = config.providerBaseUrl || entry.baseUrl || '';
+
+  if (entry.requiresBaseUrl && !baseUrl) {
+    throw new Error(`${entry.name} base URL is required. Configure it in Settings.`);
+  }
+
+  if (!apiKey && !entry.apiKeyOptional) {
+    throw new Error(`${entry.name} API key is required. Configure it in Settings.`);
+  }
+
+  const model = config.model || entry.defaultModel;
+  if (!model) {
+    throw new Error(`${entry.name} model is required. Configure it in Settings.`);
+  }
+
+  if (entry.compatibility === 'openai') {
+    return new OpenAICompatibleProvider({
+      type: resolvedType,
+      providerName: entry.name,
+      apiKey,
+      baseUrl,
+      defaultModel: model,
+    });
+  }
+
+  return new AnthropicCompatibleProvider({
+    type: resolvedType,
+    providerName: entry.name,
+    apiKey,
+    baseUrl,
+    defaultModel: model,
+  });
+}
 
 // ============ Legacy Encryption Functions (for migration only) ============
 // These functions are only used to decrypt settings from legacy JSON files
@@ -159,6 +262,38 @@ function sanitizeSettings(settings: LLMSettings): LLMSettings {
     };
   }
 
+  if (sanitized.groq) {
+    sanitized.groq = {
+      ...sanitized.groq,
+      apiKey: decryptSecret(sanitized.groq.apiKey),
+    };
+  }
+
+  if (sanitized.xai) {
+    sanitized.xai = {
+      ...sanitized.xai,
+      apiKey: decryptSecret(sanitized.xai.apiKey),
+    };
+  }
+
+  if (sanitized.kimi) {
+    sanitized.kimi = {
+      ...sanitized.kimi,
+      apiKey: decryptSecret(sanitized.kimi.apiKey),
+    };
+  }
+
+  if (sanitized.customProviders) {
+    const normalized: Record<string, CustomProviderConfig> = {};
+    for (const [key, value] of Object.entries(sanitized.customProviders)) {
+      normalized[key] = {
+        ...value,
+        apiKey: decryptSecret(value.apiKey),
+      };
+    }
+    sanitized.customProviders = normalized;
+  }
+
   return sanitized;
 }
 
@@ -204,6 +339,7 @@ export interface LLMSettings {
   openrouter?: {
     apiKey?: string;
     model?: string;
+    baseUrl?: string;
   };
   openai?: {
     apiKey?: string;
@@ -214,12 +350,31 @@ export interface LLMSettings {
     tokenExpiresAt?: number;
     authMethod?: 'api_key' | 'oauth';
   };
+  groq?: {
+    apiKey?: string;
+    model?: string;
+    baseUrl?: string;
+  };
+  xai?: {
+    apiKey?: string;
+    model?: string;
+    baseUrl?: string;
+  };
+  kimi?: {
+    apiKey?: string;
+    model?: string;
+    baseUrl?: string;
+  };
+  customProviders?: Record<string, CustomProviderConfig>;
   // Cached models from API (populated when user refreshes)
   cachedGeminiModels?: CachedModelInfo[];
   cachedOpenRouterModels?: CachedModelInfo[];
   cachedOllamaModels?: CachedModelInfo[];
   cachedBedrockModels?: CachedModelInfo[];
   cachedOpenAIModels?: CachedModelInfo[];
+  cachedGroqModels?: CachedModelInfo[];
+  cachedXaiModels?: CachedModelInfo[];
+  cachedKimiModels?: CachedModelInfo[];
 }
 
 const DEFAULT_SETTINGS: LLMSettings = {
@@ -234,6 +389,22 @@ export class LLMProviderFactory {
   private static legacySettingsPath: string;
   private static cachedSettings: LLMSettings | null = null;
   private static migrationCompleted = false;
+
+  private static normalizeCustomProviders(settings: LLMSettings): void {
+    if (!settings.customProviders) return;
+
+    const legacyKey = settings.customProviders['kimi-coding'];
+    if (legacyKey && !settings.customProviders['kimi-code']) {
+      settings.customProviders['kimi-code'] = legacyKey;
+    }
+    if (settings.customProviders['kimi-coding']) {
+      delete settings.customProviders['kimi-coding'];
+    }
+
+    if (settings.providerType === 'kimi-coding') {
+      settings.providerType = 'kimi-code';
+    }
+  }
 
   /**
    * Initialize the factory
@@ -330,6 +501,7 @@ export class LLMProviderFactory {
         const stored = repository.load<LLMSettings>('llm');
         if (stored) {
           settings = { ...DEFAULT_SETTINGS, ...stored };
+          this.normalizeCustomProviders(settings);
           settingsExist = true;
         }
       }
@@ -369,11 +541,29 @@ export class LLMProviderFactory {
     if (settings.openai?.apiKey || settings.openai?.accessToken) {
       return 'openai';
     }
+    if (settings.groq?.apiKey) {
+      return 'groq';
+    }
+    if (settings.xai?.apiKey) {
+      return 'xai';
+    }
+    if (settings.kimi?.apiKey) {
+      return 'kimi';
+    }
     if (settings.bedrock?.accessKeyId || settings.bedrock?.profile) {
       return 'bedrock';
     }
     if (settings.ollama?.baseUrl || settings.ollama?.model) {
       return 'ollama';
+    }
+
+    if (settings.customProviders) {
+      for (const entry of CUSTOM_PROVIDER_CATALOG) {
+        const config = getCustomProviderConfig(settings.customProviders, entry.id);
+        if (isCustomProviderConfigured(entry, config)) {
+          return entry.id;
+        }
+      }
     }
 
     // No valid credentials detected - user needs to configure via Settings
@@ -418,10 +608,22 @@ export class LLMProviderFactory {
   static createProvider(overrideConfig?: Partial<LLMProviderConfig>): LLMProvider {
     const settings = this.loadSettings();
     const providerType = overrideConfig?.type || settings.providerType;
+    const customConfig = getCustomProviderConfig(settings.customProviders, providerType);
 
     const config: LLMProviderConfig = {
       type: providerType,
-      model: this.getModelId(settings.modelKey, providerType, settings.ollama?.model, settings.gemini?.model, settings.openrouter?.model, settings.openai?.model),
+      model: this.getModelId(
+        settings.modelKey,
+        providerType,
+        settings.ollama?.model,
+        settings.gemini?.model,
+        settings.openrouter?.model,
+        settings.openai?.model,
+        settings.groq?.model,
+        settings.xai?.model,
+        settings.kimi?.model,
+        settings.customProviders
+      ),
       // Anthropic config - from settings only
       anthropicApiKey: normalizeSecret(overrideConfig?.anthropicApiKey) || settings.anthropic?.apiKey,
       // Bedrock config - from settings only
@@ -437,11 +639,24 @@ export class LLMProviderFactory {
       geminiApiKey: normalizeSecret(overrideConfig?.geminiApiKey) || settings.gemini?.apiKey,
       // OpenRouter config - from settings only
       openrouterApiKey: normalizeSecret(overrideConfig?.openrouterApiKey) || settings.openrouter?.apiKey,
+      openrouterBaseUrl: overrideConfig?.openrouterBaseUrl || settings.openrouter?.baseUrl,
       // OpenAI config - from settings only
       openaiApiKey: normalizeSecret(overrideConfig?.openaiApiKey) || settings.openai?.apiKey,
       openaiAccessToken: normalizeSecret(overrideConfig?.openaiAccessToken) || settings.openai?.accessToken,
       openaiRefreshToken: settings.openai?.refreshToken,
       openaiTokenExpiresAt: settings.openai?.tokenExpiresAt,
+      // Groq config - from settings only
+      groqApiKey: normalizeSecret(overrideConfig?.groqApiKey) || settings.groq?.apiKey,
+      groqBaseUrl: overrideConfig?.groqBaseUrl || settings.groq?.baseUrl,
+      // xAI config - from settings only
+      xaiApiKey: normalizeSecret(overrideConfig?.xaiApiKey) || settings.xai?.apiKey,
+      xaiBaseUrl: overrideConfig?.xaiBaseUrl || settings.xai?.baseUrl,
+      // Kimi config - from settings only
+      kimiApiKey: normalizeSecret(overrideConfig?.kimiApiKey) || settings.kimi?.apiKey,
+      kimiBaseUrl: overrideConfig?.kimiBaseUrl || settings.kimi?.baseUrl,
+      // Custom provider config
+      providerApiKey: normalizeSecret(overrideConfig?.providerApiKey) || customConfig?.apiKey,
+      providerBaseUrl: overrideConfig?.providerBaseUrl || customConfig?.baseUrl,
     };
 
     return this.createProviderFromConfig(config);
@@ -451,6 +666,12 @@ export class LLMProviderFactory {
    * Create a provider from explicit config
    */
   static createProviderFromConfig(config: LLMProviderConfig): LLMProvider {
+    const customEntry = getCustomProviderEntry(config.type);
+    if (customEntry) {
+      const resolvedType = resolveCustomProviderId(config.type);
+      return createCustomProvider(config, customEntry, resolvedType);
+    }
+
     switch (config.type) {
       case 'anthropic':
         return new AnthropicProvider(config);
@@ -464,6 +685,12 @@ export class LLMProviderFactory {
         return new OpenRouterProvider(config);
       case 'openai':
         return new OpenAIProvider(config);
+      case 'groq':
+        return new GroqProvider(config);
+      case 'xai':
+        return new XAIProvider(config);
+      case 'kimi':
+        return new KimiProvider(config);
       default:
         throw new Error(`Unknown provider type: ${config.type}`);
     }
@@ -472,7 +699,24 @@ export class LLMProviderFactory {
   /**
    * Get the model ID for a provider
    */
-  static getModelId(modelKey: ModelKey | string, providerType: LLMProviderType, ollamaModel?: string, geminiModel?: string, openrouterModel?: string, openaiModel?: string): string {
+  static getModelId(
+    modelKey: ModelKey | string,
+    providerType: LLMProviderType,
+    ollamaModel?: string,
+    geminiModel?: string,
+    openrouterModel?: string,
+    openaiModel?: string,
+    groqModel?: string,
+    xaiModel?: string,
+    kimiModel?: string,
+    customProviders?: Record<string, CustomProviderConfig>
+  ): string {
+    const customEntry = getCustomProviderEntry(providerType);
+    if (customEntry) {
+      const customConfig = getCustomProviderConfig(customProviders, providerType);
+      return customConfig?.model || customEntry.defaultModel;
+    }
+
     // For Ollama, use the specific Ollama model if provided
     if (providerType === 'ollama') {
       return ollamaModel || 'gpt-oss:20b';
@@ -491,6 +735,21 @@ export class LLMProviderFactory {
     // For OpenAI, use the specific model if provided or default
     if (providerType === 'openai') {
       return openaiModel || 'gpt-4o-mini';
+    }
+
+    // For Groq, use the specific model if provided or default
+    if (providerType === 'groq') {
+      return groqModel || 'llama-3.1-8b-instant';
+    }
+
+    // For xAI, use the specific model if provided or default
+    if (providerType === 'xai') {
+      return xaiModel || 'grok-4-fast-non-reasoning';
+    }
+
+    // For Kimi, use the specific model if provided or default
+    if (providerType === 'kimi') {
+      return kimiModel || 'kimi-k2.5';
     }
 
     // For other providers, look up in MODELS
@@ -529,7 +788,7 @@ export class LLMProviderFactory {
   }> {
     const settings = this.loadSettings();
 
-    return [
+    const builtIns = [
       {
         type: 'anthropic' as LLMProviderType,
         name: 'Anthropic API',
@@ -551,6 +810,21 @@ export class LLMProviderFactory {
         configured: !!(settings.openai?.apiKey || settings.openai?.accessToken),
       },
       {
+        type: 'groq' as LLMProviderType,
+        name: 'Groq',
+        configured: !!settings.groq?.apiKey,
+      },
+      {
+        type: 'xai' as LLMProviderType,
+        name: 'xAI (Grok)',
+        configured: !!settings.xai?.apiKey,
+      },
+      {
+        type: 'kimi' as LLMProviderType,
+        name: 'Kimi',
+        configured: !!settings.kimi?.apiKey,
+      },
+      {
         type: 'bedrock' as LLMProviderType,
         name: 'AWS Bedrock',
         configured: !!(settings.bedrock?.accessKeyId || settings.bedrock?.profile),
@@ -561,6 +835,17 @@ export class LLMProviderFactory {
         configured: !!(settings.ollama?.baseUrl || settings.ollama?.model),
       },
     ];
+
+    const customProviders = CUSTOM_PROVIDER_CATALOG.map((entry: ProviderCatalogEntry) => {
+      const config = getCustomProviderConfig(settings.customProviders, entry.id);
+      return {
+        type: entry.id,
+        name: entry.name,
+        configured: isCustomProviderConfigured(entry, config),
+      };
+    });
+
+    return [...builtIns, ...customProviders];
   }
 
   /**
@@ -755,11 +1040,13 @@ export class LLMProviderFactory {
   /**
    * Fetch available OpenRouter models from the API
    */
-  static async getOpenRouterModels(apiKey?: string): Promise<Array<{ id: string; name: string; context_length: number }>> {
+  static async getOpenRouterModels(apiKey?: string, baseUrl?: string): Promise<Array<{ id: string; name: string; context_length: number }>> {
     const settings = this.loadSettings();
     // Normalize empty strings to undefined
     const normalizedApiKey = apiKey?.trim() || undefined;
     const key = normalizedApiKey || settings.openrouter?.apiKey;
+    const normalizedBaseUrl = baseUrl?.trim() || undefined;
+    const resolvedBaseUrl = normalizedBaseUrl || settings.openrouter?.baseUrl;
 
     const defaultModels = [
       { id: 'anthropic/claude-3.5-sonnet', name: 'Claude 3.5 Sonnet', context_length: 200000 },
@@ -780,6 +1067,7 @@ export class LLMProviderFactory {
         type: 'openrouter',
         model: '',
         openrouterApiKey: key,
+        openrouterBaseUrl: resolvedBaseUrl,
       });
       return await provider.getAvailableModels();
     } catch (error: any) {
@@ -872,6 +1160,109 @@ export class LLMProviderFactory {
   }
 
   /**
+   * Fetch available Groq models from the API
+   */
+  static async getGroqModels(apiKey?: string, baseUrl?: string): Promise<Array<{ id: string; name: string }>> {
+    const settings = this.loadSettings();
+    const normalizedApiKey = apiKey?.trim() || undefined;
+    const key = normalizedApiKey || settings.groq?.apiKey;
+    const normalizedBaseUrl = baseUrl?.trim() || undefined;
+    const resolvedBaseUrl = normalizedBaseUrl || settings.groq?.baseUrl;
+
+    const defaultModels = [
+      { id: 'llama-3.1-8b-instant', name: 'Llama 3.1 8B Instant' },
+      { id: 'llama-3.3-70b-versatile', name: 'Llama 3.3 70B Versatile' },
+    ];
+
+    if (!key) {
+      return defaultModels;
+    }
+
+    try {
+      const provider = new GroqProvider({
+        type: 'groq',
+        model: '',
+        groqApiKey: key,
+        groqBaseUrl: resolvedBaseUrl,
+      });
+      return await provider.getAvailableModels();
+    } catch (error: any) {
+      console.error('Failed to fetch Groq models:', error);
+      return defaultModels;
+    }
+  }
+
+  /**
+   * Fetch available xAI models from the API
+   */
+  static async getXAIModels(apiKey?: string, baseUrl?: string): Promise<Array<{ id: string; name: string }>> {
+    const settings = this.loadSettings();
+    const normalizedApiKey = apiKey?.trim() || undefined;
+    const key = normalizedApiKey || settings.xai?.apiKey;
+    const normalizedBaseUrl = baseUrl?.trim() || undefined;
+    const resolvedBaseUrl = normalizedBaseUrl || settings.xai?.baseUrl;
+
+    const defaultModels = [
+      { id: 'grok-4', name: 'Grok 4' },
+      { id: 'grok-4-fast-non-reasoning', name: 'Grok 4 Fast (Non-Reasoning)' },
+      { id: 'grok-4-fast-reasoning', name: 'Grok 4 Fast (Reasoning)' },
+    ];
+
+    if (!key) {
+      return defaultModels;
+    }
+
+    try {
+      const provider = new XAIProvider({
+        type: 'xai',
+        model: '',
+        xaiApiKey: key,
+        xaiBaseUrl: resolvedBaseUrl,
+      });
+      return await provider.getAvailableModels();
+    } catch (error: any) {
+      console.error('Failed to fetch xAI models:', error);
+      return defaultModels;
+    }
+  }
+
+  /**
+   * Fetch available Kimi models from the API
+   */
+  static async getKimiModels(apiKey?: string, baseUrl?: string): Promise<Array<{ id: string; name: string }>> {
+    const settings = this.loadSettings();
+    const normalizedApiKey = apiKey?.trim() || undefined;
+    const key = normalizedApiKey || settings.kimi?.apiKey;
+    const normalizedBaseUrl = baseUrl?.trim() || undefined;
+    const resolvedBaseUrl = normalizedBaseUrl || settings.kimi?.baseUrl;
+
+    const defaultModels = [
+      { id: 'kimi-k2.5', name: 'Kimi K2.5' },
+      { id: 'kimi-k2-0905-preview', name: 'Kimi K2.5 Preview' },
+      { id: 'kimi-k2-turbo-preview', name: 'Kimi K2 Turbo (Preview)' },
+      { id: 'kimi-k2-thinking', name: 'Kimi K2 Thinking' },
+      { id: 'kimi-k2-thinking-turbo', name: 'Kimi K2 Thinking Turbo' },
+    ];
+
+    if (!key) {
+      return defaultModels;
+    }
+
+    try {
+      const provider = new KimiProvider({
+        type: 'kimi',
+        model: '',
+        kimiApiKey: key,
+        kimiBaseUrl: resolvedBaseUrl,
+      });
+      return await provider.getAvailableModels();
+    } catch (error: any) {
+      console.error('Failed to fetch Kimi models:', error);
+      return defaultModels;
+    }
+  }
+
+  /**
    * Format OpenAI model ID to display name
    */
   private static formatOpenAIModelName(modelId: string): string {
@@ -921,7 +1312,7 @@ export class LLMProviderFactory {
    * Save cached models for a provider
    */
   static saveCachedModels(
-    providerType: 'gemini' | 'openrouter' | 'ollama' | 'bedrock' | 'openai',
+    providerType: 'gemini' | 'openrouter' | 'ollama' | 'bedrock' | 'openai' | 'groq' | 'xai' | 'kimi',
     models: CachedModelInfo[]
   ): void {
     const settings = this.loadSettings();
@@ -942,6 +1333,15 @@ export class LLMProviderFactory {
       case 'openai':
         settings.cachedOpenAIModels = models;
         break;
+      case 'groq':
+        settings.cachedGroqModels = models;
+        break;
+      case 'xai':
+        settings.cachedXaiModels = models;
+        break;
+      case 'kimi':
+        settings.cachedKimiModels = models;
+        break;
     }
 
     this.saveSettings(settings);
@@ -950,7 +1350,9 @@ export class LLMProviderFactory {
   /**
    * Get cached models for a provider
    */
-  static getCachedModels(providerType: 'gemini' | 'openrouter' | 'ollama' | 'bedrock' | 'openai'): CachedModelInfo[] | undefined {
+  static getCachedModels(
+    providerType: 'gemini' | 'openrouter' | 'ollama' | 'bedrock' | 'openai' | 'groq' | 'xai' | 'kimi'
+  ): CachedModelInfo[] | undefined {
     const settings = this.loadSettings();
 
     switch (providerType) {
@@ -964,6 +1366,12 @@ export class LLMProviderFactory {
         return settings.cachedBedrockModels;
       case 'openai':
         return settings.cachedOpenAIModels;
+      case 'groq':
+        return settings.cachedGroqModels;
+      case 'xai':
+        return settings.cachedXaiModels;
+      case 'kimi':
+        return settings.cachedKimiModels;
       default:
         return undefined;
     }
