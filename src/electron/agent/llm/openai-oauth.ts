@@ -20,11 +20,12 @@ export interface OpenAIOAuthTokens {
  * Convert pi-ai OAuthCredentials to our token format
  */
 function credentialsToTokens(credentials: OAuthCredentials): OpenAIOAuthTokens {
+  const email = typeof credentials.email === 'string' ? credentials.email : undefined;
   return {
     access_token: credentials.access,
     refresh_token: credentials.refresh,
     expires_at: credentials.expires,
-    email: credentials.email,
+    email,
   };
 }
 

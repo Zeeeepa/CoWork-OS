@@ -2111,14 +2111,24 @@ a,
   width: 36px;
   height: 36px;
   border-radius: var(--radius-sm);
-  background: var(--color-bg-secondary);
+  background: var(--color-bg-tertiary);
   border: 1px solid var(--color-border);
-  color: var(--color-text-secondary);
+  color: var(--color-text);
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
   transition: all 0.2s ease;
+}
+
+.attachment-btn svg {
+  stroke: currentColor;
+  flex-shrink: 0;
+}
+
+.attachment-btn-left {
+  flex: 0 0 auto;
+  margin-right: 2px;
 }
 
 .attachment-btn:hover {
@@ -2151,7 +2161,9 @@ a,
 }
 
 .attachment-panel {
-  margin: 8px 0 0;
+  width: 100%;
+  max-width: 800px;
+  margin: 0 auto 10px;
   display: flex;
   flex-direction: column;
   gap: 8px;

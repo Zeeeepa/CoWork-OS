@@ -72,6 +72,18 @@ export const FileImportSchema = z.object({
   files: z.array(z.string().min(1).max(MAX_PATH_LENGTH)).min(1).max(20),
 });
 
+export const FileImportDataSchema = z.object({
+  workspaceId: z.string().refine(
+    (val) => val === TEMP_WORKSPACE_ID || z.string().uuid().safeParse(val).success,
+    { message: 'Must be a valid UUID or temp workspace ID' }
+  ),
+  files: z.array(z.object({
+    name: z.string().min(1).max(MAX_PATH_LENGTH),
+    data: z.string().min(1),
+    mimeType: z.string().max(200).optional(),
+  })).min(1).max(20),
+});
+
 // ============ Approval Schemas ============
 
 export const ApprovalResponseSchema = z.object({

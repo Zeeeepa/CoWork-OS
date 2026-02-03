@@ -1433,6 +1433,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   showInFinder: (filePath: string, workspacePath?: string) => ipcRenderer.invoke('file:showInFinder', filePath, workspacePath),
   readFileForViewer: (filePath: string, workspacePath?: string) => ipcRenderer.invoke('file:readForViewer', { filePath, workspacePath }),
   importFilesToWorkspace: (data: { workspaceId: string; files: string[] }) => ipcRenderer.invoke('file:importToWorkspace', data),
+  importDataToWorkspace: (data: { workspaceId: string; files: Array<{ name: string; data: string; mimeType?: string }> }) =>
+    ipcRenderer.invoke('file:importDataToWorkspace', data),
 
   // Shell APIs
   openExternal: (url: string) => ipcRenderer.invoke('shell:openExternal', url),
@@ -2239,6 +2241,7 @@ export interface ElectronAPI {
   showInFinder: (filePath: string, workspacePath?: string) => Promise<void>;
   readFileForViewer: (filePath: string, workspacePath?: string) => Promise<FileViewerResult>;
   importFilesToWorkspace: (data: { workspaceId: string; files: string[] }) => Promise<Array<{ relativePath: string; fileName: string; size: number; mimeType?: string }>>;
+  importDataToWorkspace: (data: { workspaceId: string; files: Array<{ name: string; data: string; mimeType?: string }> }) => Promise<Array<{ relativePath: string; fileName: string; size: number; mimeType?: string }>>;
   openExternal: (url: string) => Promise<void>;
   createTask: (data: any) => Promise<any>;
   getTask: (id: string) => Promise<any>;

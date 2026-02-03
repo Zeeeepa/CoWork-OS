@@ -57,6 +57,7 @@ import {
   TaskRenameSchema,
   TaskMessageSchema,
   FileImportSchema,
+  FileImportDataSchema,
   ApprovalResponseSchema,
   LLMSettingsSchema,
   SearchSettingsSchema,
@@ -749,6 +750,73 @@ export async function setupIpcHandlers(
         fileName: uniqueName,
         size: stats.size,
         mimeType,
+      });
+    }
+
+    return results;
+  });
+
+  // File import handler - save provided file data into the workspace (clipboard / drag data)
+  ipcMain.handle('file:importDataToWorkspace', async (_, data: { workspaceId: string; files: Array<{ name: string; data: string; mimeType?: string }> }) => {
+    const validated = validateInput(FileImportDataSchema, data, 'file import data');
+    const workspace = workspaceRepo.findById(validated.workspaceId);
+
+    if (!workspace) {
+      throw new Error(`Workspace not found: ${validated.workspaceId}`);
+    }
+
+    if (!workspace.permissions.write) {
+      throw new Error('Write permission not granted for workspace');
+    }
+
+    const sanitizeFileName = (fileName: string): string => {
+      const sanitized = fileName.replace(/[<>:"/\\|?*\x00-\x1F]/g, '_').trim();
+      return sanitized.length > 0 ? sanitized : 'file';
+    };
+
+    const ensureExtension = (fileName: string, mimeType?: string): string => {
+      if (path.extname(fileName) || !mimeType) return fileName;
+      const ext = mime.extension(mimeType);
+      return ext ? `${fileName}.${ext}` : fileName;
+    };
+
+    const ensureUniqueName = (dir: string, baseName: string, usedNames: Set<string>): string => {
+      const ext = path.extname(baseName);
+      const stem = path.basename(baseName, ext);
+      let candidate = baseName;
+      let counter = 1;
+      while (usedNames.has(candidate) || fsSync.existsSync(path.join(dir, candidate))) {
+        candidate = `${stem}-${counter}${ext}`;
+        counter += 1;
+      }
+      usedNames.add(candidate);
+      return candidate;
+    };
+
+    const uploadRoot = path.join(workspace.path, '.cowork', 'uploads', `${Date.now()}`);
+    await fs.mkdir(uploadRoot, { recursive: true });
+    const usedNames = new Set<string>();
+
+    const results: Array<{ relativePath: string; fileName: string; size: number; mimeType?: string }> = [];
+
+    for (const file of validated.files) {
+      const rawName = ensureExtension(sanitizeFileName(file.name), file.mimeType);
+      const uniqueName = ensureUniqueName(uploadRoot, rawName, usedNames);
+      const destination = path.join(uploadRoot, uniqueName);
+      const buffer = Buffer.from(file.data, 'base64');
+
+      const sizeCheck = GuardrailManager.isFileSizeExceeded(buffer.length);
+      if (sizeCheck.exceeded) {
+        throw new Error(`File "${rawName}" is ${sizeCheck.sizeMB.toFixed(1)}MB and exceeds the ${sizeCheck.limitMB}MB limit.`);
+      }
+
+      await fs.writeFile(destination, buffer);
+
+      results.push({
+        relativePath: path.relative(workspace.path, destination),
+        fileName: uniqueName,
+        size: buffer.length,
+        mimeType: file.mimeType,
       });
     }
 

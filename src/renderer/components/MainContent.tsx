@@ -51,7 +51,7 @@ const buildTaskTitle = (text: string): string => {
 };
 
 type SelectedFileInfo = {
-  path: string;
+  path?: string;
   name: string;
   size: number;
   mimeType?: string;
@@ -59,6 +59,7 @@ type SelectedFileInfo = {
 
 type PendingAttachment = SelectedFileInfo & {
   id: string;
+  dataBase64?: string;
 };
 
 type ImportedAttachment = {
@@ -1271,22 +1272,41 @@ export function MainContent({ task, selectedTaskId, workspace, events, onSendMes
     window.setTimeout(() => setAttachmentError(null), 5000);
   };
 
-  const appendPendingAttachments = (files: SelectedFileInfo[]) => {
+  const readFileAsBase64 = (file: File): Promise<string> =>
+    new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const result = typeof reader.result === 'string' ? reader.result : '';
+        const [, base64] = result.split(',');
+        if (!base64) {
+          reject(new Error('Failed to read file data.'));
+          return;
+        }
+        resolve(base64);
+      };
+      reader.onerror = () => reject(reader.error || new Error('Failed to read file data.'));
+      reader.readAsDataURL(file);
+    });
+
+  const appendPendingAttachments = (files: PendingAttachment[]) => {
     if (files.length === 0) return;
     setPendingAttachments((prev) => {
-      const existingPaths = new Set(prev.map((attachment) => attachment.path));
+      const existingKeys = new Set(
+        prev.map((attachment) => attachment.path || `${attachment.name}-${attachment.size}`)
+      );
       const next = [...prev];
       for (const file of files) {
-        if (existingPaths.has(file.path)) continue;
+        const key = file.path || `${file.name}-${file.size}`;
+        if (existingKeys.has(key)) continue;
         if (next.length >= MAX_ATTACHMENTS) {
           reportAttachmentError(`You can attach up to ${MAX_ATTACHMENTS} files.`);
           break;
         }
         next.push({
           ...file,
-          id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+          id: file.id || `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
         });
-        existingPaths.add(file.path);
+        existingKeys.add(key);
       }
       return next;
     });
@@ -1296,7 +1316,12 @@ export function MainContent({ task, selectedTaskId, workspace, events, onSendMes
     try {
       const files = await window.electronAPI.selectFiles();
       if (!files || files.length === 0) return;
-      appendPendingAttachments(files);
+      appendPendingAttachments(
+        files.map((file) => ({
+          ...file,
+          id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        }))
+      );
     } catch (error) {
       console.error('Failed to select files:', error);
       reportAttachmentError('Failed to add attachments. Please try again.');
@@ -1322,33 +1347,76 @@ export function MainContent({ task, selectedTaskId, workspace, events, onSendMes
     setIsDraggingFiles(false);
   };
 
-  const handleDrop = (event: React.DragEvent) => {
+  const handleDrop = async (event: React.DragEvent) => {
     if (!isFileDrag(event)) return;
     event.preventDefault();
     setIsDraggingFiles(false);
 
     const droppedFiles = Array.from(event.dataTransfer.files || []);
-    const files: SelectedFileInfo[] = [];
-    let missingPath = false;
+    try {
+      const pending = await Promise.all(
+        droppedFiles.map(async (file) => {
+          const filePath = (file as File & { path?: string }).path;
+          if (filePath) {
+            return {
+              id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+              path: filePath,
+              name: file.name,
+              size: file.size,
+              mimeType: file.type || undefined,
+            } satisfies PendingAttachment;
+          }
+          const dataBase64 = await readFileAsBase64(file);
+          return {
+            id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+            name: file.name || `drop-${Date.now()}`,
+            size: file.size,
+            mimeType: file.type || undefined,
+            dataBase64,
+          } satisfies PendingAttachment;
+        })
+      );
 
-    droppedFiles.forEach((file) => {
-      const filePath = (file as File & { path?: string }).path;
-      if (!filePath) {
-        missingPath = true;
-        return;
-      }
-      files.push({
-        path: filePath,
-        name: file.name,
-        size: file.size,
-        mimeType: file.type || undefined,
-      });
-    });
-
-    if (missingPath) {
-      reportAttachmentError('Drag-and-drop is not supported for these files. Use the attach button instead.');
+      appendPendingAttachments(pending);
+    } catch (error) {
+      console.error('Failed to handle dropped files:', error);
+      reportAttachmentError('Failed to attach dropped files.');
     }
-    appendPendingAttachments(files);
+  };
+
+  const handlePaste = async (event: React.ClipboardEvent) => {
+    const clipboardData = event.clipboardData;
+    let clipboardFiles = Array.from(clipboardData?.files || []);
+    if (clipboardFiles.length === 0 && clipboardData?.items) {
+      clipboardData.items.forEach((item) => {
+        if (item.kind === 'file') {
+          const file = item.getAsFile();
+          if (file) clipboardFiles.push(file);
+        }
+      });
+    }
+    if (clipboardFiles.length === 0) return;
+    event.preventDefault();
+
+    try {
+      const pending = await Promise.all(
+        clipboardFiles.map(async (file) => {
+          const dataBase64 = await readFileAsBase64(file);
+          return {
+            id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+            name: file.name || `paste-${Date.now()}`,
+            size: file.size,
+            mimeType: file.type || undefined,
+            dataBase64,
+          } satisfies PendingAttachment;
+        })
+      );
+
+      appendPendingAttachments(pending);
+    } catch (error) {
+      console.error('Failed to handle pasted files:', error);
+      reportAttachmentError('Failed to attach pasted files.');
+    }
   };
 
   const renderAttachmentPanel = () => {
@@ -1391,10 +1459,32 @@ export function MainContent({ task, selectedTaskId, workspace, events, onSendMes
     if (!workspace) {
       throw new Error('Select a workspace before attaching files.');
     }
-    return window.electronAPI.importFilesToWorkspace({
-      workspaceId: workspace.id,
-      files: pendingAttachments.map((attachment) => attachment.path),
-    });
+    const pathAttachments = pendingAttachments.filter((attachment) => attachment.path && !attachment.dataBase64);
+    const dataAttachments = pendingAttachments.filter((attachment) => attachment.dataBase64);
+
+    const results: ImportedAttachment[] = [];
+
+    if (pathAttachments.length > 0) {
+      const imported = await window.electronAPI.importFilesToWorkspace({
+        workspaceId: workspace.id,
+        files: pathAttachments.map((attachment) => attachment.path as string),
+      });
+      results.push(...imported);
+    }
+
+    if (dataAttachments.length > 0) {
+      const imported = await window.electronAPI.importDataToWorkspace({
+        workspaceId: workspace.id,
+        files: dataAttachments.map((attachment) => ({
+          name: attachment.name,
+          data: attachment.dataBase64 as string,
+          mimeType: attachment.mimeType,
+        })),
+      });
+      results.push(...imported);
+    }
+
+    return results;
   };
 
   const handleSend = async () => {
@@ -1751,6 +1841,7 @@ export function MainContent({ task, selectedTaskId, workspace, events, onSendMes
             </div>
 
             {/* Input Area */}
+            {renderAttachmentPanel()}
             <div
               className={`welcome-input-container cli-input-container ${isDraggingFiles ? 'drag-over' : ''}`}
               onDragOver={handleDragOver}
@@ -1798,6 +1889,7 @@ export function MainContent({ task, selectedTaskId, workspace, events, onSendMes
                     value={inputValue}
                     onChange={handleInputChange}
                     onKeyDown={handleKeyDown}
+                    onPaste={handlePaste}
                     onClick={handleInputClick}
                     onKeyUp={handleInputKeyUp}
                     rows={1}
@@ -1806,8 +1898,6 @@ export function MainContent({ task, selectedTaskId, workspace, events, onSendMes
                 </div>
                 {!inputValue && <span className="cli-cursor" style={{ left: cursorLeft }} />}
               </div>
-
-              {renderAttachmentPanel()}
 
               {/* Goal Mode Options */}
               <div className="goal-mode-section">
@@ -1849,12 +1939,31 @@ export function MainContent({ task, selectedTaskId, workspace, events, onSendMes
               </div>
 
               <div className="welcome-input-footer">
-                <div className="input-left-actions">
-                  <div className="workspace-dropdown-container" ref={workspaceDropdownRef}>
-                    <button className="folder-selector" onClick={handleWorkspaceDropdownToggle}>
-                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                        <path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z" />
-                      </svg>
+              <div className="input-left-actions">
+                <button
+                  className="attachment-btn attachment-btn-left"
+                  onClick={handleAttachFiles}
+                  disabled={isUploadingAttachments}
+                  title="Attach files"
+                >
+                  <svg
+                    width="18"
+                    height="18"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  >
+                    <path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48" />
+                  </svg>
+                </button>
+                <div className="workspace-dropdown-container" ref={workspaceDropdownRef}>
+                  <button className="folder-selector" onClick={handleWorkspaceDropdownToggle}>
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z" />
+                    </svg>
                       <span>{workspace?.id === TEMP_WORKSPACE_ID ? 'Work in a folder' : (workspace?.name || 'Work in a folder')}</span>
                       <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className={showWorkspaceDropdown ? 'chevron-up' : ''}>
                         <path d="M6 9l6 6 6-6" />
@@ -1988,16 +2097,6 @@ export function MainContent({ task, selectedTaskId, workspace, events, onSendMes
                       </div>
                     )}
                   </div>
-                  <button
-                    className="attachment-btn"
-                    onClick={handleAttachFiles}
-                    disabled={isUploadingAttachments}
-                    title="Attach files"
-                  >
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                      <path d="M21.44 11.05l-8.49 8.49a5 5 0 0 1-7.07-7.07l8.49-8.49a3 3 0 0 1 4.24 4.24l-8.49 8.49a1 1 0 0 1-1.41-1.41l7.78-7.78" />
-                    </svg>
-                  </button>
                   <button
                     className={`voice-input-btn ${voiceInput.state}`}
                     onClick={voiceInput.toggleRecording}
@@ -2300,6 +2399,7 @@ export function MainContent({ task, selectedTaskId, workspace, events, onSendMes
 
       {/* Footer with Input */}
       <div className="main-footer">
+        {renderAttachmentPanel()}
         <div
           className={`input-container ${isDraggingFiles ? 'drag-over' : ''}`}
           onDragOver={handleDragOver}
@@ -2376,8 +2476,26 @@ export function MainContent({ task, selectedTaskId, workspace, events, onSendMes
               </div>
             </div>
           )}
-          {renderAttachmentPanel()}
-          <div className="input-row">
+            <div className="input-row">
+              <button
+                className="attachment-btn attachment-btn-left"
+                onClick={handleAttachFiles}
+                disabled={isUploadingAttachments}
+                title="Attach files"
+              >
+                <svg
+                  width="18"
+                  height="18"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48" />
+                </svg>
+              </button>
             <div className="mention-autocomplete-wrapper" ref={mentionContainerRef}>
               <textarea
                 ref={textareaRef}
@@ -2386,6 +2504,7 @@ export function MainContent({ task, selectedTaskId, workspace, events, onSendMes
                 value={inputValue}
                 onChange={handleInputChange}
                 onKeyDown={handleKeyDown}
+                onPaste={handlePaste}
                 onClick={handleInputClick}
                 onKeyUp={handleInputKeyUp}
                 rows={1}
@@ -2398,16 +2517,6 @@ export function MainContent({ task, selectedTaskId, workspace, events, onSendMes
                 selectedModel={selectedModel}
                 onModelChange={onModelChange}
               />
-              <button
-                className="attachment-btn"
-                onClick={handleAttachFiles}
-                disabled={isUploadingAttachments}
-                title="Attach files"
-              >
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <path d="M21.44 11.05l-8.49 8.49a5 5 0 0 1-7.07-7.07l8.49-8.49a3 3 0 0 1 4.24 4.24l-8.49 8.49a1 1 0 0 1-1.41-1.41l7.78-7.78" />
-                </svg>
-              </button>
               <button
                 className={`voice-input-btn ${voiceInput.state}`}
                 onClick={voiceInput.toggleRecording}
