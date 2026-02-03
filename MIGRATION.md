@@ -110,6 +110,8 @@ npm run dev
 4. Test connection
 5. Save
 
+Available providers include Anthropic, OpenAI, Gemini, OpenRouter, Bedrock, Ollama, Groq, xAI (Grok), Kimi, plus compatible gateways such as OpenCode Zen, Google Vertex, Google Antigravity, Google Gemini CLI, Z.AI, GLM, Vercel AI Gateway, Cerebras, Mistral, GitHub Copilot, Qwen Portal, MiniMax, Xiaomi MiMo, Venice AI, Synthetic, Kimi Code, and custom OpenAI- or Anthropic-compatible endpoints.
+
 ### 3. Set Up Messaging Channels
 
 For each channel you want to use:

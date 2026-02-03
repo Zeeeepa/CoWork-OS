@@ -35,6 +35,13 @@ This will:
 4. Click **Test Connection** to verify
 5. Save settings
 
+## Troubleshooting
+
+- If **Test Connection** fails with 401/403, verify the API key and account permissions.
+- If the model list is empty, click **Refresh Models** after entering your API key (and Base URL if overridden).
+- If a provider endpoint changes, override the **Base URL** in Settings (custom providers or Groq/xAI/Kimi/OpenRouter).
+- If Ollama fails to connect, confirm the service is running and the base URL is correct (default `http://localhost:11434`).
+
 ### Step 4: Create Your First Task
 
 1. **Select a Workspace**
@@ -151,6 +158,36 @@ Open **Settings** > **Provider** tab:
 | OpenAI (ChatGPT) | Click "Sign in with ChatGPT" to use your subscription |
 | AWS Bedrock | Enter AWS Access Key, Secret Key, and Region |
 | Ollama | Install Ollama, pull a model, select it |
+| Groq | Enter API key in Settings |
+| xAI (Grok) | Enter API key in Settings |
+| Kimi (Moonshot) | Enter API key in Settings |
+
+### Compatible / Gateway Providers
+
+Configure these in **Settings** > **LLM Provider** by entering API keys/tokens, model IDs, and base URLs when required.
+
+| Provider | Setup |
+|----------|-------|
+| OpenCode Zen | API key + base URL in Settings |
+| Google Vertex | Access token + base URL in Settings |
+| Google Antigravity | Access token + base URL in Settings |
+| Google Gemini CLI | Access token + base URL in Settings |
+| Z.AI | API key + base URL in Settings |
+| GLM | API key + base URL in Settings |
+| Vercel AI Gateway | API key in Settings |
+| Cerebras | API key in Settings |
+| Mistral | API key in Settings |
+| GitHub Copilot | GitHub token in Settings |
+| Moonshot (Kimi) | API key in Settings |
+| Qwen Portal | API key in Settings |
+| MiniMax | API key in Settings |
+| MiniMax Portal | API key in Settings |
+| Xiaomi MiMo | API key in Settings |
+| Venice AI | API key in Settings |
+| Synthetic | API key in Settings |
+| Kimi Code | API key in Settings |
+| OpenAI-Compatible (Custom) | API key + base URL in Settings |
+| Anthropic-Compatible (Custom) | API key + base URL in Settings |
 
 ### Search Providers (Optional)
 
@@ -196,6 +233,24 @@ Open **Settings** > **Web Search** tab:
 6. Open **Settings** > **Channels** > **Slack**
 7. Enter Bot Token and App-Level Token
 8. Enable and test
+
+### App Integrations (Optional)
+
+Open **Settings** > **Integrations** to connect productivity and storage tools:
+
+- Notion
+- Box
+- OneDrive
+- Google Drive
+- Dropbox
+- SharePoint
+
+### Social Integrations (Optional)
+
+#### X (Twitter)
+1. Open **Settings** > **X (Twitter)**
+2. Choose Browser Cookies or Manual Cookies
+3. Save and test the connection
 
 ## Development Workflow
 

@@ -26,7 +26,7 @@ Your AI needs a secure home. CoWork OS provides the runtime, security layers, an
 
 | | |
 |---|---|
-| **6 AI Providers** | Claude, GPT-4, Gemini, Bedrock, OpenRouter, Ollama (free/local) |
+| **20+ AI Providers** | Claude, OpenAI, Gemini, Bedrock, OpenRouter, Ollama (free/local), Groq, xAI, Kimi, Mistral, Cerebras, MiniMax, Qwen, Copilot, and more |
 | **14 Messaging Channels** | WhatsApp, Telegram, Discord, Slack, Teams, Google Chat, iMessage, Signal, Mattermost, Matrix, Twitch, LINE, BlueBubbles, Email |
 | **Security-First** | 1800+ unit tests, configurable guardrails, approval workflows |
 | **Local-First** | Your data stays on your machine. BYOK (Bring Your Own Key) |
@@ -40,7 +40,7 @@ Your AI needs a secure home. CoWork OS provides the runtime, security layers, an
 <p align="center">
   <img src="screenshots/ZeroLeaks-result-010226.png" alt="ZeroLeaks Security Assessment Result" width="600">
   <br>
-  <em>CoWork OS achieves one of the highest security scores on <a href="https://zeroleaks.ai/">ZeroLeaks</a> — outperforming solutions like OpenClaw in prompt injection resistance</em>
+  <em>CoWork OS achieves one of the highest security scores on <a href="https://zeroleaks.ai/">ZeroLeaks</a> — outperforming many commercial solutions in prompt injection resistance</em>
   <br>
   <a href="ZeroLeaks-Report-jn70f56art03m4rj7fp4b5k9p180aqfd.pdf">View Full Security Assessment Report</a>
 </p>
@@ -158,6 +158,34 @@ CoWork OS is **free and open source**. To run tasks, configure your own model cr
 | OpenAI (ChatGPT OAuth) | Sign in with ChatGPT account | Uses your ChatGPT subscription |
 | AWS Bedrock | AWS credentials in Settings | Pay-per-token via AWS |
 | Ollama (Local) | Install Ollama and pull models | **Free** (runs locally) |
+| Groq | API key in Settings | Pay-per-token |
+| xAI (Grok) | API key in Settings | Pay-per-token |
+| Kimi (Moonshot) | API key in Settings | Pay-per-token |
+
+### Compatible / Gateway Providers
+
+| Provider | Configuration | Billing |
+|----------|---------------|---------|
+| OpenCode Zen | API key + base URL in Settings | Provider billing |
+| Google Vertex | Access token + base URL in Settings | Provider billing |
+| Google Antigravity | Access token + base URL in Settings | Provider billing |
+| Google Gemini CLI | Access token + base URL in Settings | Provider billing |
+| Z.AI | API key + base URL in Settings | Provider billing |
+| GLM | API key + base URL in Settings | Provider billing |
+| Vercel AI Gateway | API key in Settings | Provider billing |
+| Cerebras | API key in Settings | Provider billing |
+| Mistral | API key in Settings | Provider billing |
+| GitHub Copilot | GitHub token in Settings | Subscription-based |
+| Moonshot (Kimi) | API key in Settings | Provider billing |
+| Qwen Portal | API key in Settings | Provider billing |
+| MiniMax | API key in Settings | Provider billing |
+| MiniMax Portal | API key in Settings | Provider billing |
+| Xiaomi MiMo | API key in Settings | Provider billing |
+| Venice AI | API key in Settings | Provider billing |
+| Synthetic | API key in Settings | Provider billing |
+| Kimi Code | API key in Settings | Provider billing |
+| OpenAI-Compatible (Custom) | API key + base URL in Settings | Provider billing |
+| Anthropic-Compatible (Custom) | API key + base URL in Settings | Provider billing |
 
 **Your usage is billed directly by your provider.** CoWork OS does not proxy or resell model access.
 
@@ -340,7 +368,7 @@ Customize agent behavior via Settings or conversation:
 ┌─────────────────────────────────────────────────────────────────┐
 │                    Execution Layer                               │
 │  File Operations | Document Skills | Browser Automation          │
-│  LLM Providers (6) | Search Providers (4) | MCP Client           │
+│  LLM Providers (20+) | Search Providers (4) | MCP Client          │
 └─────────────────────────────────────────────────────────────────┘
                               ↕
 ┌─────────────────────────────────────────────────────────────────┐
@@ -401,7 +429,7 @@ This is a good option for:
 
 - Node.js 18+ and npm
 - macOS 12 (Monterey) or later
-- One of: Anthropic API key, Google Gemini API key, OpenRouter API key, OpenAI API key, AWS Bedrock access, or Ollama installed locally
+- One of: any supported LLM provider credentials (API key/token or AWS credentials) or Ollama installed locally
 
 ### Installation
 
@@ -1411,6 +1439,191 @@ Full HTTP client for API calls (curl-like).
 
 ---
 
+## Notion Integration
+
+Configure in **Settings > Integrations > Notion**. Use `notion_action` to search, read, and update Notion content. Write actions (create, update, append, delete) require approval.
+
+### Search pages or data sources
+
+```ts
+notion_action({
+  action: "search",
+  query: "Roadmap"
+});
+```
+
+### Query a data source with filters and sorts
+
+```ts
+notion_action({
+  action: "query_data_source",
+  data_source_id: "YOUR_DATA_SOURCE_ID",
+  filter: {
+    property: "Status",
+    select: { equals: "Active" }
+  },
+  sorts: [
+    { property: "Updated", direction: "descending" }
+  ],
+  page_size: 25
+});
+```
+
+### Paginate a data source query
+
+```ts
+notion_action({
+  action: "query_data_source",
+  data_source_id: "YOUR_DATA_SOURCE_ID",
+  start_cursor: "NEXT_CURSOR_FROM_PREVIOUS_RESPONSE",
+  page_size: 25
+});
+```
+
+### Update or delete a block
+
+```ts
+notion_action({
+  action: "update_block",
+  block_id: "BLOCK_ID",
+  block_type: "paragraph",
+  block: {
+    rich_text: [{ text: { content: "Updated text" } }]
+  }
+});
+
+notion_action({
+  action: "delete_block",
+  block_id: "BLOCK_ID"
+});
+```
+
+---
+
+## Box Integration
+
+Configure in **Settings > Integrations > Box**. Use `box_action` to search, read, and manage Box files and folders. Write actions (create, upload, delete) require approval.
+
+### Search for files
+
+```ts
+box_action({
+  action: "search",
+  query: "Q4 report",
+  type: "file",
+  limit: 25
+});
+```
+
+### Upload a file
+
+```ts
+box_action({
+  action: "upload_file",
+  file_path: "reports/summary.pdf",
+  parent_id: "0"
+});
+```
+
+---
+
+## OneDrive Integration
+
+Configure in **Settings > Integrations > OneDrive**. Use `onedrive_action` to search, read, and manage OneDrive files and folders. Write actions (create, upload, delete) require approval.
+
+### Search for files
+
+```ts
+onedrive_action({
+  action: "search",
+  query: "Roadmap"
+});
+```
+
+### Upload a file
+
+```ts
+onedrive_action({
+  action: "upload_file",
+  file_path: "reports/summary.pdf"
+});
+```
+
+---
+
+## Google Drive Integration
+
+Configure in **Settings > Integrations > Google Drive**. Use `google_drive_action` to search, read, and manage Google Drive files and folders. Write actions (create, upload, delete) require approval.
+
+### List files
+
+```ts
+google_drive_action({
+  action: "list_files",
+  page_size: 20
+});
+```
+
+### Upload a file
+
+```ts
+google_drive_action({
+  action: "upload_file",
+  file_path: "reports/summary.pdf"
+});
+```
+
+---
+
+## Dropbox Integration
+
+Configure in **Settings > Integrations > Dropbox**. Use `dropbox_action` to search, read, and manage Dropbox files and folders. Write actions (create, upload, delete) require approval.
+
+### List folder contents
+
+```ts
+dropbox_action({
+  action: "list_folder",
+  path: "/Reports"
+});
+```
+
+### Upload a file
+
+```ts
+dropbox_action({
+  action: "upload_file",
+  file_path: "reports/summary.pdf",
+  path: "/Reports/summary.pdf"
+});
+```
+
+---
+
+## SharePoint Integration
+
+Configure in **Settings > Integrations > SharePoint**. Use `sharepoint_action` to search sites and manage drive items. Write actions (create, upload, delete) require approval.
+
+### Search sites
+
+```ts
+sharepoint_action({
+  action: "search_sites",
+  query: "Marketing"
+});
+```
+
+### Upload a file
+
+```ts
+sharepoint_action({
+  action: "upload_file",
+  file_path: "reports/summary.pdf"
+});
+```
+
+---
+
 ## Personality & Customization
 
 Tell the agent what you want:
@@ -1491,6 +1704,35 @@ Standard pay-per-token access to GPT models.
 ### Option 2: ChatGPT OAuth
 
 Sign in with your ChatGPT subscription to use without additional API costs.
+
+---
+
+## Additional LLM Providers
+
+Configure these in **Settings** > **LLM Provider** by entering API keys/tokens, model IDs, and base URLs when required.
+
+| Provider | Compatibility |
+|----------|---------------|
+| OpenCode Zen | OpenAI-compatible |
+| Google Vertex | OpenAI-compatible |
+| Google Antigravity | OpenAI-compatible |
+| Google Gemini CLI | OpenAI-compatible |
+| Z.AI | OpenAI-compatible |
+| GLM | OpenAI-compatible |
+| Vercel AI Gateway | Anthropic-compatible |
+| Cerebras | OpenAI-compatible |
+| Mistral | OpenAI-compatible |
+| GitHub Copilot | OpenAI-compatible |
+| Moonshot (Kimi) | OpenAI-compatible |
+| Qwen Portal | Anthropic-compatible |
+| MiniMax | OpenAI-compatible |
+| MiniMax Portal | Anthropic-compatible |
+| Xiaomi MiMo | Anthropic-compatible |
+| Venice AI | OpenAI-compatible |
+| Synthetic | Anthropic-compatible |
+| Kimi Code | OpenAI-compatible |
+| OpenAI-Compatible (Custom) | OpenAI-compatible |
+| Anthropic-Compatible (Custom) | Anthropic-compatible |
 
 ---
 
