@@ -1230,6 +1230,29 @@ export async function setupIpcHandlers(
       };
     }
 
+    const normalizeAzureSettings = (
+      incoming?: LLMSettingsData['azure'],
+      existing?: LLMSettingsData['azure']
+    ): LLMSettingsData['azure'] | undefined => {
+      if (!incoming && !existing) return undefined;
+      const mergedDeployments = [
+        ...(incoming?.deployments || []),
+        ...(existing?.deployments || []),
+      ]
+        .map((entry) => entry.trim())
+        .filter(Boolean);
+      const deployment = (incoming?.deployment || existing?.deployment || mergedDeployments[0] || '').trim();
+      if (deployment && !mergedDeployments.includes(deployment)) {
+        mergedDeployments.unshift(deployment);
+      }
+      return {
+        ...(existing || {}),
+        ...(incoming || {}),
+        deployment: deployment || undefined,
+        deployments: mergedDeployments.length > 0 ? Array.from(new Set(mergedDeployments)) : undefined,
+      };
+    };
+
     LLMProviderFactory.saveSettings({
       providerType: validated.providerType,
       modelKey: validated.modelKey as ModelKey,
@@ -1239,7 +1262,7 @@ export async function setupIpcHandlers(
       gemini: validated.gemini,
       openrouter: validated.openrouter,
       openai: openaiSettings,
-      azure: validated.azure,
+      azure: normalizeAzureSettings(validated.azure, existingSettings.azure),
       groq: validated.groq,
       xai: validated.xai,
       kimi: validated.kimi,
