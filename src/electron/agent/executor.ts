@@ -90,6 +90,25 @@ const INPUT_DEPENDENT_ERROR_PATTERNS = [
   /user denied/i,      // User denied an approval request
 ];
 
+// Keywords that imply a step wants image verification.
+const IMAGE_VERIFICATION_KEYWORDS = [
+  'image',
+  'photo',
+  'photograph',
+  'picture',
+  'render',
+  'illustration',
+  'png',
+  'jpg',
+  'jpeg',
+  'webp',
+];
+
+const IMAGE_FILE_EXTENSION_REGEX = /\.(png|jpe?g|webp|gif|bmp)$/i;
+
+// Allow a small buffer for file timestamp granularity/clock skew.
+const IMAGE_VERIFICATION_TIME_SKEW_MS = 1000;
+
 /**
  * Check if an error is non-retryable (quota/rate limit related)
  * These errors indicate a systemic problem with the tool/API
@@ -1060,6 +1079,7 @@ export class TaskExecutor {
     const effectiveModelKey = taskModelKey || settings.modelKey;
 
     // Get the model ID
+    const azureDeployment = settings.azure?.deployment || settings.azure?.deployments?.[0];
     this.modelId = LLMProviderFactory.getModelId(
       effectiveModelKey,
       settings.providerType,
@@ -1067,6 +1087,7 @@ export class TaskExecutor {
       settings.gemini?.model,
       settings.openrouter?.model,
       settings.openai?.model,
+      azureDeployment,
       settings.groq?.model,
       settings.xai?.model,
       settings.kimi?.model,
@@ -1395,6 +1416,34 @@ export class TaskExecutor {
     if (this.isTestCommand(command)) {
       this.testRunObserved = true;
     }
+  }
+
+  private stepRequiresImageVerification(step: PlanStep): boolean {
+    const description = (step.description || '').toLowerCase();
+    if (!description.includes('verify')) return false;
+    return IMAGE_VERIFICATION_KEYWORDS.some((keyword) => description.includes(keyword));
+  }
+
+  private hasNewImageFromGlobResult(result: any, since: number): boolean {
+    const matches = result?.matches;
+    if (!Array.isArray(matches)) return false;
+
+    const threshold = Math.max(0, since - IMAGE_VERIFICATION_TIME_SKEW_MS);
+
+    for (const match of matches) {
+      const path = typeof match === 'string' ? match : match?.path;
+      if (!path || !IMAGE_FILE_EXTENSION_REGEX.test(path)) continue;
+
+      const modified = typeof match === 'object' ? match?.modified : undefined;
+      if (!modified) continue;
+
+      const modifiedTime = Date.parse(modified);
+      if (!Number.isNaN(modifiedTime) && modifiedTime >= threshold) {
+        return true;
+      }
+    }
+
+    return false;
   }
 
   /**
@@ -2987,6 +3036,14 @@ SCHEDULING & REMINDERS:
       let hadToolSuccessAfterError = false;
       let lastToolErrorReason = '';
       let awaitingUserInput = false;
+      let hadRunCommandFailure = false;
+      let hadToolSuccessAfterRunCommandFailure = false;
+      const expectsImageVerification = this.stepRequiresImageVerification(step);
+      const imageVerificationSince =
+        typeof this.task.createdAt === 'number'
+          ? this.task.createdAt
+          : (step.startedAt ?? Date.now());
+      let foundNewImage = false;
       const maxIterations = 5;  // Reduced from 10 to prevent excessive iterations per step
       const maxEmptyResponses = 3;
 
@@ -3254,7 +3311,20 @@ SCHEDULING & REMINDERS:
               // Record file operation for tracking
               this.recordFileOperation(content.name, content.input, result);
               this.recordCommandExecution(content.name, content.input, result);
-              this.recordCommandExecution(content.name, content.input, result);
+
+              const toolSucceeded = !(result && result.success === false);
+
+              if (content.name === 'run_command' && !toolSucceeded) {
+                hadRunCommandFailure = true;
+              } else if (hadRunCommandFailure && toolSucceeded) {
+                hadToolSuccessAfterRunCommandFailure = true;
+              }
+
+              if (expectsImageVerification && content.name === 'glob' && !foundNewImage) {
+                if (this.hasNewImageFromGlobResult(result, imageVerificationSince)) {
+                  foundNewImage = true;
+                }
+              }
 
               // Check if the result indicates an error (some tools return error in result)
               if (result && result.success === false) {
@@ -3323,6 +3393,9 @@ SCHEDULING & REMINDERS:
 
               hadToolError = true;
               lastToolErrorReason = `Tool ${content.name} failed: ${error.message}`;
+              if (content.name === 'run_command') {
+                hadRunCommandFailure = true;
+              }
 
               // Track the failure
               const shouldDisable = this.toolFailureTracker.recordFailure(content.name, error.message);
@@ -3383,6 +3456,20 @@ SCHEDULING & REMINDERS:
         stepFailed = true;
         if (!lastFailureReason) {
           lastFailureReason = lastToolErrorReason || 'One or more tools failed without recovery.';
+        }
+      }
+
+      if (hadRunCommandFailure && !hadToolSuccessAfterRunCommandFailure) {
+        stepFailed = true;
+        if (!lastFailureReason) {
+          lastFailureReason = 'run_command failed and no subsequent tool succeeded.';
+        }
+      }
+
+      if (expectsImageVerification && !foundNewImage) {
+        stepFailed = true;
+        if (!lastFailureReason) {
+          lastFailureReason = 'Verification failed: no newly generated image was found.';
         }
       }
 
