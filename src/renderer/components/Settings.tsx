@@ -299,6 +299,84 @@ const integrationItems: Array<{ key: IntegrationChannel; label: string; icon: Re
   { key: 'dropbox', label: 'Dropbox', icon: <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M7 5l5 3-5 3-5-3 5-3zm10 0l5 3-5 3-5-3 5-3zM7 13l5 3-5 3-5-3 5-3zm10 0l5 3-5 3-5-3 5-3z" /></svg> },
 ];
 
+const LLM_PROVIDER_ICONS: Record<string, JSX.Element> = {
+  anthropic: (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" />
+    </svg>
+  ),
+  openai: (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <circle cx="12" cy="12" r="10" />
+      <path d="M12 6v6l4 2" />
+    </svg>
+  ),
+  azure: (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <path d="M5 16a4 4 0 0 1 2-7.46A5 5 0 0 1 17 9h1a4 4 0 1 1 0 8H6a3 3 0 0 1-1-1z" />
+    </svg>
+  ),
+  gemini: (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
+    </svg>
+  ),
+  openrouter: (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <circle cx="12" cy="12" r="10" />
+      <path d="M2 12h20M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
+    </svg>
+  ),
+  ollama: (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <rect x="4" y="4" width="16" height="16" rx="2" />
+      <path d="M9 9h6v6H9z" />
+    </svg>
+  ),
+  groq: (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <path d="M4 12h16" />
+      <path d="M12 4v16" />
+      <circle cx="12" cy="12" r="9" />
+    </svg>
+  ),
+  xai: (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <path d="M4 4l16 16" />
+      <path d="M20 4L4 20" />
+    </svg>
+  ),
+  kimi: (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <path d="M12 2l3 7 7 3-7 3-3 7-3-7-7-3 7-3 3-7z" />
+    </svg>
+  ),
+  bedrock: (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z" />
+    </svg>
+  ),
+};
+
+const getLLMProviderIcon = (providerType: string, customEntry?: { compatibility?: string }) => {
+  if (LLM_PROVIDER_ICONS[providerType]) {
+    return LLM_PROVIDER_ICONS[providerType];
+  }
+  if (customEntry?.compatibility === 'anthropic') {
+    return LLM_PROVIDER_ICONS.anthropic;
+  }
+  if (customEntry?.compatibility === 'openai') {
+    return LLM_PROVIDER_ICONS.openai;
+  }
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <rect x="3" y="3" width="18" height="18" rx="2" />
+      <path d="M8 12h8" />
+      <path d="M12 8v8" />
+    </svg>
+  );
+};
+
 export function Settings({ onBack, onSettingsChanged, themeMode, accentColor, onThemeChange, onAccentChange, initialTab = 'appearance', onShowOnboarding, onboardingCompletedAt }: SettingsProps) {
   const [activeTab, setActiveTab] = useState<SettingsTab>(initialTab);
   const [activeSecondaryChannel, setActiveSecondaryChannel] = useState<SecondaryChannel>('discord');
@@ -351,6 +429,13 @@ export function Settings({ onBack, onSettingsChanged, themeMode, accentColor, on
   const [openaiAuthMethod, setOpenaiAuthMethod] = useState<'api_key' | 'oauth'>('api_key');
   const [openaiOAuthConnected, setOpenaiOAuthConnected] = useState(false);
   const [openaiOAuthLoading, setOpenaiOAuthLoading] = useState(false);
+
+  // Azure OpenAI state
+  const [azureApiKey, setAzureApiKey] = useState('');
+  const [azureEndpoint, setAzureEndpoint] = useState('');
+  const [azureDeployment, setAzureDeployment] = useState('');
+  const [azureDeploymentsText, setAzureDeploymentsText] = useState('');
+  const [azureApiVersion, setAzureApiVersion] = useState('2024-02-15-preview');
 
   // Groq state
   const [groqApiKey, setGroqApiKey] = useState('');
@@ -415,6 +500,47 @@ export function Settings({ onBack, onSettingsChanged, themeMode, accentColor, on
     });
     return Object.keys(sanitized).length > 0 ? sanitized : undefined;
   };
+
+  const parseAzureDeployments = (value: string): string[] => {
+    const seen = new Set<string>();
+    return value
+      .split(/[\n,]+/)
+      .map((entry) => entry.trim())
+      .filter(Boolean)
+      .filter((entry) => {
+        if (seen.has(entry)) {
+          return false;
+        }
+        seen.add(entry);
+        return true;
+      });
+  };
+
+  const buildAzureSettings = () => {
+    const deployments = parseAzureDeployments(azureDeploymentsText);
+    let deployment = azureDeployment.trim();
+    if (deployment) {
+      if (!deployments.includes(deployment)) {
+        deployments.unshift(deployment);
+      }
+    } else if (deployments.length > 0) {
+      deployment = deployments[0];
+    }
+
+    return {
+      deployment: deployment || undefined,
+      deployments: deployments.length > 0 ? deployments : undefined,
+    };
+  };
+
+  useEffect(() => {
+    if (!azureDeployment) {
+      const deployments = parseAzureDeployments(azureDeploymentsText);
+      if (deployments[0]) {
+        setAzureDeployment(deployments[0]);
+      }
+    }
+  }, [azureDeploymentsText, azureDeployment]);
 
   const loadConfigStatus = async () => {
     try {
@@ -512,6 +638,29 @@ export function Settings({ onBack, onSettingsChanged, themeMode, accentColor, on
         // Legacy: accessToken present but no authMethod set
         setOpenaiOAuthConnected(true);
         setOpenaiAuthMethod('oauth');
+      }
+
+      // Set Azure OpenAI form state
+      if (loadedSettings.azure?.apiKey) {
+        setAzureApiKey(loadedSettings.azure.apiKey);
+      }
+      if (loadedSettings.azure?.endpoint) {
+        setAzureEndpoint(loadedSettings.azure.endpoint);
+      }
+      {
+        const loadedDeployments = (loadedSettings.azure?.deployments && loadedSettings.azure.deployments.length > 0)
+          ? loadedSettings.azure.deployments
+          : (loadedSettings.azure?.deployment ? [loadedSettings.azure.deployment] : []);
+        if (loadedDeployments.length > 0) {
+          setAzureDeploymentsText(loadedDeployments.join('\n'));
+        }
+        const selectedDeployment = loadedSettings.azure?.deployment || loadedDeployments[0];
+        if (selectedDeployment) {
+          setAzureDeployment(selectedDeployment);
+        }
+      }
+      if (loadedSettings.azure?.apiVersion) {
+        setAzureApiVersion(loadedSettings.azure.apiVersion);
       }
 
       // Set Groq form state
@@ -728,6 +877,42 @@ export function Settings({ onBack, onSettingsChanged, themeMode, accentColor, on
     }
   };
 
+  const handleProviderSelect = (providerType: LLMProviderType) => {
+    setSettings((prev) => ({ ...prev, providerType }));
+
+    const resolvedCustomType = resolveCustomProviderId(providerType);
+    const customEntry = CUSTOM_PROVIDER_MAP.get(resolvedCustomType);
+    if (customEntry) {
+      setCustomProviders((prev) => {
+        const existing = prev[resolvedCustomType] || {};
+        const updated: CustomProviderConfig = { ...existing };
+        if (!updated.model && customEntry.defaultModel) {
+          updated.model = customEntry.defaultModel;
+        }
+        if (!updated.baseUrl && customEntry.baseUrl) {
+          updated.baseUrl = customEntry.baseUrl;
+        }
+        return { ...prev, [resolvedCustomType]: updated };
+      });
+    }
+
+    if (providerType === 'ollama') {
+      loadOllamaModels();
+    } else if (providerType === 'gemini') {
+      loadGeminiModels();
+    } else if (providerType === 'openrouter') {
+      loadOpenRouterModels();
+    } else if (providerType === 'openai') {
+      loadOpenAIModels();
+    } else if (providerType === 'groq') {
+      loadGroqModels();
+    } else if (providerType === 'xai') {
+      loadXAIModels();
+    } else if (providerType === 'kimi') {
+      loadKimiModels();
+    }
+  };
+
   const handleOpenAIOAuthLogin = async () => {
     try {
       setOpenaiOAuthLoading(true);
@@ -806,6 +991,7 @@ export function Settings({ onBack, onSettingsChanged, themeMode, accentColor, on
         }
         sanitizedCustomProviders[resolvedProviderTypeForSave] = withDefaults;
       }
+      const azureSettings = buildAzureSettings();
 
       // Always save settings for ALL providers to preserve API keys and model selections
       // when switching between providers
@@ -850,6 +1036,14 @@ export function Settings({ onBack, onSettingsChanged, themeMode, accentColor, on
           model: openaiModel || undefined,
           authMethod: openaiAuthMethod,
         },
+        // Always include Azure OpenAI settings
+        azure: {
+          apiKey: azureApiKey || undefined,
+          endpoint: azureEndpoint || undefined,
+          deployment: azureSettings.deployment,
+          deployments: azureSettings.deployments,
+          apiVersion: azureApiVersion || undefined,
+        },
         // Always include Groq settings
         groq: {
           apiKey: groqApiKey || undefined,
@@ -887,6 +1081,7 @@ export function Settings({ onBack, onSettingsChanged, themeMode, accentColor, on
       setTestResult(null);
 
       const sanitizedCustomProviders = sanitizeCustomProviders(customProviders) || {};
+      const azureSettings = buildAzureSettings();
 
       const testConfig = {
         providerType: settings.providerType,
@@ -923,6 +1118,13 @@ export function Settings({ onBack, onSettingsChanged, themeMode, accentColor, on
           authMethod: openaiAuthMethod,
           // OAuth tokens are handled by the backend from stored settings
         } : undefined,
+        azure: settings.providerType === 'azure' ? {
+          apiKey: azureApiKey || undefined,
+          endpoint: azureEndpoint || undefined,
+          deployment: azureSettings.deployment,
+          deployments: azureSettings.deployments,
+          apiVersion: azureApiVersion || undefined,
+        } : undefined,
         groq: settings.providerType === 'groq' ? {
           apiKey: groqApiKey || undefined,
           model: groqModel || undefined,
@@ -956,19 +1158,15 @@ export function Settings({ onBack, onSettingsChanged, themeMode, accentColor, on
 
   return (
     <div className="settings-page">
-      <div className="settings-page-header">
-        <h1>Settings</h1>
-      </div>
-
       <div className="settings-page-layout">
         <div className="settings-sidebar">
+          <h1 className="settings-sidebar-title">Settings</h1>
           <button className="settings-back-btn" onClick={onBack}>
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <path d="M19 12H5M12 19l-7-7 7-7" />
             </svg>
             Back
           </button>
-          <div className="settings-nav-divider" />
           <div className="settings-sidebar-search">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <circle cx="11" cy="11" r="8" />
@@ -1025,7 +1223,8 @@ export function Settings({ onBack, onSettingsChanged, themeMode, accentColor, on
           </div>
         </div>
 
-        <div className="settings-content">
+        <div className="settings-content-card">
+          <div className="settings-content">
           {activeTab === 'appearance' ? (
             <AppearanceSettings
               themeMode={themeMode}
@@ -1142,169 +1341,53 @@ export function Settings({ onBack, onSettingsChanged, themeMode, accentColor, on
           ) : loading ? (
             <div className="settings-loading">Loading settings...</div>
           ) : (
-            <>
-              <div className="settings-section">
-                <h3>LLM Provider</h3>
+            <div className="llm-provider-panel">
+              <div className="llm-provider-header">
+                <h2>LLM Provider</h2>
                 <p className="settings-description">
                   Choose which service to use for AI model calls
                 </p>
-
-                <div className="provider-options">
-                  {providers.map(provider => {
-                    const isAnthropic = provider.type === 'anthropic';
-                    const isBedrock = provider.type === 'bedrock';
-                    const isOllama = provider.type === 'ollama';
-                    const isGemini = provider.type === 'gemini';
-                    const isOpenRouter = provider.type === 'openrouter';
-                    const isOpenAI = provider.type === 'openai';
-                    const isGroq = provider.type === 'groq';
-                    const isXAI = provider.type === 'xai';
-                    const isKimi = provider.type === 'kimi';
-                    const providerType = provider.type as LLMProviderType;
-                    const resolvedCustomType = resolveCustomProviderId(providerType);
-                    const customEntry = CUSTOM_PROVIDER_MAP.get(resolvedCustomType);
-                    const isCustom = !!customEntry;
-
-                    return (
-                      <label
-                        key={provider.type}
-                        className={`provider-option ${settings.providerType === provider.type ? 'selected' : ''}`}
-                      >
-                        <input
-                          type="radio"
-                          name="provider"
-                          value={provider.type}
-                          checked={settings.providerType === provider.type}
-                          onChange={() => {
-                            setSettings({ ...settings, providerType: providerType });
-                            if (customEntry) {
-                              setCustomProviders((prev) => {
-                                const existing = prev[resolvedCustomType] || {};
-                                const updated: CustomProviderConfig = { ...existing };
-                                if (!updated.model && customEntry.defaultModel) {
-                                  updated.model = customEntry.defaultModel;
-                                }
-                                if (!updated.baseUrl && customEntry.baseUrl) {
-                                  updated.baseUrl = customEntry.baseUrl;
-                                }
-                                return { ...prev, [resolvedCustomType]: updated };
-                              });
-                            }
-                            // Load models when selecting provider
-                            if (provider.type === 'ollama') {
-                              loadOllamaModels();
-                            } else if (provider.type === 'gemini') {
-                              loadGeminiModels();
-                            } else if (provider.type === 'openrouter') {
-                              loadOpenRouterModels();
-                            } else if (provider.type === 'openai') {
-                              loadOpenAIModels();
-                            } else if (provider.type === 'groq') {
-                              loadGroqModels();
-                            } else if (provider.type === 'xai') {
-                              loadXAIModels();
-                            } else if (provider.type === 'kimi') {
-                              loadKimiModels();
-                            }
-                          }}
-                        />
-                        <div className="provider-option-content">
-                          <div className="provider-option-title">
-                            {provider.name}
-                            {provider.configured && (
-                              <span className="provider-configured" title="Credentials detected">
-                                [Configured]
-                              </span>
-                            )}
-                          </div>
-                          <div className="provider-option-description">
-                            {isAnthropic && provider.configured && (
-                              <>API key configured</>
-                            )}
-                            {isAnthropic && !provider.configured && (
-                              <>Enter your Anthropic API key below</>
-                            )}
-                            {isGemini && provider.configured && (
-                              <>API key configured</>
-                            )}
-                            {isGemini && !provider.configured && (
-                              <>Enter your Gemini API key below</>
-                            )}
-                            {isOpenRouter && provider.configured && (
-                              <>API key configured</>
-                            )}
-                            {isOpenRouter && !provider.configured && (
-                              <>Enter your OpenRouter API key below</>
-                            )}
-                            {isOpenAI && provider.configured && openaiOAuthConnected && (
-                              <>Connected via ChatGPT account</>
-                            )}
-                            {isOpenAI && provider.configured && !openaiOAuthConnected && (
-                              <>API key configured</>
-                            )}
-                            {isOpenAI && !provider.configured && (
-                              <>Sign in with ChatGPT or enter API key</>
-                            )}
-                            {isGroq && provider.configured && (
-                              <>API key configured</>
-                            )}
-                            {isGroq && !provider.configured && (
-                              <>Enter your Groq API key below</>
-                            )}
-                            {isXAI && provider.configured && (
-                              <>API key configured</>
-                            )}
-                            {isXAI && !provider.configured && (
-                              <>Enter your xAI API key below</>
-                            )}
-                            {isKimi && provider.configured && (
-                              <>API key configured</>
-                            )}
-                            {isKimi && !provider.configured && (
-                              <>Enter your Kimi API key below</>
-                            )}
-                            {isCustom && provider.configured && (
-                              <>API key configured</>
-                            )}
-                            {isCustom && !provider.configured && (
-                              <>{customEntry?.description || `Configure ${provider.name} below`}</>
-                            )}
-                            {isBedrock && provider.configured && (
-                              <>AWS credentials configured</>
-                            )}
-                            {isBedrock && !provider.configured && (
-                              <>Configure your AWS credentials below</>
-                            )}
-                            {isOllama && provider.configured && (
-                              <>Ollama server detected - configure model below</>
-                            )}
-                            {isOllama && !provider.configured && (
-                              <>Run local LLM models with Ollama</>
-                            )}
-                          </div>
-                        </div>
-                      </label>
-                    );
-                  })}
-                </div>
               </div>
+              <div className="llm-provider-tabs">
+                {providers.map(provider => {
+                  const providerType = provider.type as LLMProviderType;
+                  const resolvedCustomType = resolveCustomProviderId(providerType);
+                  const customEntry = CUSTOM_PROVIDER_MAP.get(resolvedCustomType);
+                  const icon = getLLMProviderIcon(providerType, customEntry);
 
-              {settings.providerType === 'anthropic' && (
-                <div className="settings-section">
-                  <h3>Model</h3>
-                  <select
-                    className="settings-select"
-                    value={settings.modelKey}
-                    onChange={(e) => setSettings({ ...settings, modelKey: e.target.value })}
-                  >
-                    {models.map(model => (
-                      <option key={model.key} value={model.key}>
-                        {model.displayName}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              )}
+                  return (
+                    <button
+                      key={provider.type}
+                      type="button"
+                      className={`llm-provider-tab ${settings.providerType === provider.type ? 'active' : ''} ${provider.configured ? 'configured' : ''}`}
+                      onClick={() => handleProviderSelect(providerType)}
+                    >
+                      {icon}
+                      <span className="llm-provider-tab-label">{provider.name}</span>
+                      {provider.configured && (
+                        <span className="llm-provider-tab-status" title="Configured" />
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+              <div className="llm-provider-content">
+                {settings.providerType === 'anthropic' && (
+                  <div className="settings-section">
+                    <h3>Model</h3>
+                    <select
+                      className="settings-select"
+                      value={settings.modelKey}
+                      onChange={(e) => setSettings({ ...settings, modelKey: e.target.value })}
+                    >
+                      {models.map(model => (
+                        <option key={model.key} value={model.key}>
+                          {model.displayName}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
 
               {settings.providerType === 'anthropic' && (
                 <div className="settings-section">
@@ -1607,6 +1690,80 @@ export function Settings({ onBack, onSettingsChanged, themeMode, accentColor, on
                         {loadingOpenAIModels ? 'Loading...' : 'Refresh Models'}
                       </button>
                     )}
+                  </div>
+                </>
+              )}
+
+              {settings.providerType === 'azure' && (
+                <>
+                  <div className="settings-section">
+                    <h3>Azure OpenAI Endpoint</h3>
+                    <p className="settings-description">
+                      Enter your Azure OpenAI resource endpoint (for example, <code>https://your-resource.openai.azure.com</code>).
+                    </p>
+                    <input
+                      type="text"
+                      className="settings-input"
+                      placeholder="https://your-resource.openai.azure.com"
+                      value={azureEndpoint}
+                      onChange={(e) => setAzureEndpoint(e.target.value)}
+                    />
+                  </div>
+
+                  <div className="settings-section">
+                    <h3>Azure OpenAI API Key</h3>
+                    <p className="settings-description">
+                      Enter the API key for your Azure OpenAI resource.
+                    </p>
+                    <input
+                      type="password"
+                      className="settings-input"
+                      placeholder="Azure API key"
+                      value={azureApiKey}
+                      onChange={(e) => setAzureApiKey(e.target.value)}
+                    />
+                  </div>
+
+                  <div className="settings-section">
+                    <h3>Deployment Names</h3>
+                    <p className="settings-description">
+                      Enter one or more deployment names (one per line). These appear in the model selector.
+                    </p>
+                    <textarea
+                      className="settings-input"
+                      placeholder="gpt-4o-mini\nmy-other-deployment"
+                      rows={3}
+                      value={azureDeploymentsText}
+                      onChange={(e) => setAzureDeploymentsText(e.target.value)}
+                    />
+                  </div>
+
+                  <div className="settings-section">
+                    <h3>Default Deployment</h3>
+                    <p className="settings-description">
+                      Optional. Used for connection tests and initial selection. You can switch models in the main view.
+                    </p>
+                    <input
+                      type="text"
+                      className="settings-input"
+                      placeholder="gpt-4o-mini"
+                      value={azureDeployment}
+                      onChange={(e) => setAzureDeployment(e.target.value)}
+                    />
+                  </div>
+
+                  <div className="settings-section">
+                    <h3>API Version</h3>
+                    <p className="settings-description">
+                      Optional override for the Azure OpenAI API version.
+                    </p>
+                    <input
+                      type="text"
+                      className="settings-input"
+                      placeholder="2024-02-15-preview"
+                      value={azureApiVersion}
+                      onChange={(e) => setAzureApiVersion(e.target.value)}
+                    />
                   </div>
                 </>
               )}
@@ -2076,7 +2233,15 @@ export function Settings({ onBack, onSettingsChanged, themeMode, accentColor, on
                         <line x1="15" y1="9" x2="9" y2="15" />
                         <line x1="9" y1="9" x2="15" y2="15" />
                       </svg>
-                      {testResult.error || 'Connection failed'}
+                      <span title={testResult.error}>
+                        {(() => {
+                          const error = testResult.error || 'Connection failed';
+                          // Extract meaningful part before JSON details
+                          const jsonStart = error.indexOf(' [{');
+                          const truncated = jsonStart > 0 ? error.slice(0, jsonStart) : error;
+                          return truncated.length > 200 ? truncated.slice(0, 200) + '...' : truncated;
+                        })()}
+                      </span>
                     </>
                   )}
                 </div>
@@ -2098,8 +2263,10 @@ export function Settings({ onBack, onSettingsChanged, themeMode, accentColor, on
                   {saving ? 'Saving...' : 'Save Settings'}
                 </button>
               </div>
-            </>
+              </div>
+            </div>
           )}
+          </div>
         </div>
       </div>
     </div>

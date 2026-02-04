@@ -391,63 +391,38 @@ export function VoiceSettings({ onStateChange }: VoiceSettingsProps) {
       <div className="settings-section">
         <h4>Text-to-Speech Provider</h4>
         <p className="settings-description">Choose the voice synthesis provider.</p>
-        <div className="provider-options">
+        <div className="llm-provider-tabs">
           <button
-            className={`provider-option ${settings.ttsProvider === 'elevenlabs' ? 'selected' : ''} ${settings.elevenLabsApiKey ? 'configured' : ''}`}
+            className={`llm-provider-tab ${settings.ttsProvider === 'elevenlabs' ? 'active' : ''}`}
             onClick={() => handleTTSProviderChange('elevenlabs')}
             disabled={saving}
           >
-            <div className="provider-option-header">
-              <span className="provider-name">ElevenLabs</span>
-              {settings.elevenLabsApiKey && (
-                <svg className="provider-configured-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-                  <path d="M20 6L9 17l-5-5" />
-                </svg>
-              )}
-            </div>
-            <span className="provider-badge">Premium</span>
+            <span className="llm-provider-tab-label">ElevenLabs</span>
+            {settings.elevenLabsApiKey && <span className="llm-provider-tab-status" />}
           </button>
           <button
-            className={`provider-option ${settings.ttsProvider === 'openai' ? 'selected' : ''} ${settings.openaiApiKey ? 'configured' : ''}`}
+            className={`llm-provider-tab ${settings.ttsProvider === 'openai' ? 'active' : ''}`}
             onClick={() => handleTTSProviderChange('openai')}
             disabled={saving}
           >
-            <div className="provider-option-header">
-              <span className="provider-name">OpenAI</span>
-              {settings.openaiApiKey && (
-                <svg className="provider-configured-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-                  <path d="M20 6L9 17l-5-5" />
-                </svg>
-              )}
-            </div>
+            <span className="llm-provider-tab-label">OpenAI</span>
+            {settings.openaiApiKey && <span className="llm-provider-tab-status" />}
           </button>
           <button
-            className={`provider-option ${settings.ttsProvider === 'azure' ? 'selected' : ''} ${settings.azureApiKey && settings.azureEndpoint ? 'configured' : ''}`}
+            className={`llm-provider-tab ${settings.ttsProvider === 'azure' ? 'active' : ''}`}
             onClick={() => handleTTSProviderChange('azure')}
             disabled={saving}
           >
-            <div className="provider-option-header">
-              <span className="provider-name">Azure OpenAI</span>
-              {settings.azureApiKey && settings.azureEndpoint && (
-                <svg className="provider-configured-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-                  <path d="M20 6L9 17l-5-5" />
-                </svg>
-              )}
-            </div>
-            <span className="provider-badge">Enterprise</span>
+            <span className="llm-provider-tab-label">Azure OpenAI</span>
+            {settings.azureApiKey && settings.azureEndpoint && <span className="llm-provider-tab-status" />}
           </button>
           <button
-            className={`provider-option ${settings.ttsProvider === 'local' ? 'selected' : ''} configured`}
+            className={`llm-provider-tab ${settings.ttsProvider === 'local' ? 'active' : ''}`}
             onClick={() => handleTTSProviderChange('local')}
             disabled={saving}
           >
-            <div className="provider-option-header">
-              <span className="provider-name">System</span>
-              <svg className="provider-configured-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-                <path d="M20 6L9 17l-5-5" />
-              </svg>
-            </div>
-            <span className="provider-badge">Free</span>
+            <span className="llm-provider-tab-label">System</span>
+            <span className="llm-provider-tab-status" />
           </button>
         </div>
       </div>
@@ -698,49 +673,30 @@ export function VoiceSettings({ onStateChange }: VoiceSettingsProps) {
       <div className="settings-section">
         <h4>Speech-to-Text Provider</h4>
         <p className="settings-description">Choose the speech recognition provider.</p>
-        <div className="provider-options">
+        <div className="llm-provider-tabs">
           <button
-            className={`provider-option ${settings.sttProvider === 'openai' ? 'selected' : ''} ${settings.openaiApiKey ? 'configured' : ''}`}
+            className={`llm-provider-tab ${settings.sttProvider === 'openai' ? 'active' : ''}`}
             onClick={() => handleSTTProviderChange('openai')}
             disabled={saving}
           >
-            <div className="provider-option-header">
-              <span className="provider-name">OpenAI Whisper</span>
-              {settings.openaiApiKey && (
-                <svg className="provider-configured-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-                  <path d="M20 6L9 17l-5-5" />
-                </svg>
-              )}
-            </div>
-            <span className="provider-badge">Recommended</span>
+            <span className="llm-provider-tab-label">OpenAI Whisper</span>
+            {settings.openaiApiKey && <span className="llm-provider-tab-status" />}
           </button>
           <button
-            className={`provider-option ${settings.sttProvider === 'azure' ? 'selected' : ''} ${settings.azureApiKey && settings.azureEndpoint ? 'configured' : ''}`}
+            className={`llm-provider-tab ${settings.sttProvider === 'azure' ? 'active' : ''}`}
             onClick={() => handleSTTProviderChange('azure')}
             disabled={saving}
           >
-            <div className="provider-option-header">
-              <span className="provider-name">Azure Whisper</span>
-              {settings.azureApiKey && settings.azureEndpoint && (
-                <svg className="provider-configured-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-                  <path d="M20 6L9 17l-5-5" />
-                </svg>
-              )}
-            </div>
-            <span className="provider-badge">Enterprise</span>
+            <span className="llm-provider-tab-label">Azure Whisper</span>
+            {settings.azureApiKey && settings.azureEndpoint && <span className="llm-provider-tab-status" />}
           </button>
           <button
-            className={`provider-option ${settings.sttProvider === 'local' ? 'selected' : ''} configured`}
+            className={`llm-provider-tab ${settings.sttProvider === 'local' ? 'active' : ''}`}
             onClick={() => handleSTTProviderChange('local')}
             disabled={saving}
           >
-            <div className="provider-option-header">
-              <span className="provider-name">System</span>
-              <svg className="provider-configured-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-                <path d="M20 6L9 17l-5-5" />
-              </svg>
-            </div>
-            <span className="provider-badge">Free</span>
+            <span className="llm-provider-tab-label">System</span>
+            <span className="llm-provider-tab-status" />
           </button>
         </div>
       </div>
@@ -748,27 +704,27 @@ export function VoiceSettings({ onStateChange }: VoiceSettingsProps) {
       {/* Voice Input Mode */}
       <div className="settings-section">
         <h4>Voice Input Mode</h4>
-        <div className="provider-options">
+        <div className="llm-provider-tabs">
           <button
-            className={`provider-option ${settings.inputMode === 'push_to_talk' ? 'selected' : ''}`}
+            className={`llm-provider-tab ${settings.inputMode === 'push_to_talk' ? 'active' : ''}`}
             onClick={() => handleInputModeChange('push_to_talk')}
             disabled={saving}
           >
-            <span className="provider-name">Push to Talk</span>
+            <span className="llm-provider-tab-label">Push to Talk</span>
           </button>
           <button
-            className={`provider-option ${settings.inputMode === 'voice_activity' ? 'selected' : ''}`}
+            className={`llm-provider-tab ${settings.inputMode === 'voice_activity' ? 'active' : ''}`}
             onClick={() => handleInputModeChange('voice_activity')}
             disabled={saving}
           >
-            <span className="provider-name">Voice Activity</span>
+            <span className="llm-provider-tab-label">Voice Activity</span>
           </button>
           <button
-            className={`provider-option ${settings.inputMode === 'disabled' ? 'selected' : ''}`}
+            className={`llm-provider-tab ${settings.inputMode === 'disabled' ? 'active' : ''}`}
             onClick={() => handleInputModeChange('disabled')}
             disabled={saving}
           >
-            <span className="provider-name">Disabled</span>
+            <span className="llm-provider-tab-label">Disabled</span>
           </button>
         </div>
         <p className="settings-hint">

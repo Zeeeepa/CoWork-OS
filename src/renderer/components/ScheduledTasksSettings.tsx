@@ -221,24 +221,9 @@ function formatDuration(ms: number): string {
 // Styles
 const styles = {
   container: {
-    padding: '24px',
-    maxWidth: '900px',
-  } as React.CSSProperties,
-  header: {
-    marginBottom: '24px',
-  } as React.CSSProperties,
-  title: {
-    fontSize: '24px',
-    fontWeight: 600,
-    color: 'var(--color-text-primary)',
-    marginBottom: '8px',
-    display: 'flex',
-    alignItems: 'center',
-    gap: '12px',
-  } as React.CSSProperties,
-  subtitle: {
-    fontSize: '14px',
-    color: 'var(--color-text-muted)',
+    padding: 0,
+    maxWidth: '100%',
+    width: '100%',
   } as React.CSSProperties,
   statsGrid: {
     display: 'grid',
@@ -265,21 +250,6 @@ const styles = {
     fontSize: '24px',
     fontWeight: 600,
     color: 'var(--color-text-primary)',
-  } as React.CSSProperties,
-  addButton: {
-    display: 'inline-flex',
-    alignItems: 'center',
-    gap: '8px',
-    padding: '12px 20px',
-    backgroundColor: 'var(--color-accent)',
-    color: '#000',
-    border: 'none',
-    borderRadius: 'var(--radius-md)',
-    fontSize: '14px',
-    fontWeight: 600,
-    cursor: 'pointer',
-    transition: 'all 0.2s ease',
-    marginBottom: '24px',
   } as React.CSSProperties,
   jobCard: {
     backgroundColor: 'var(--color-bg-glass)',
@@ -517,19 +487,7 @@ export function ScheduledTasksSettings() {
   };
 
   if (loading) {
-    return (
-      <div style={styles.container}>
-        <div style={styles.header}>
-          <div style={styles.title}>
-            {Icons.clock}
-            <span>Scheduled Tasks</span>
-          </div>
-        </div>
-        <div style={{ padding: '40px', textAlign: 'center', color: 'var(--color-text-muted)' }}>
-          Loading...
-        </div>
-      </div>
-    );
+    return <div className="settings-loading">Loading scheduled tasks...</div>;
   }
 
   const lastRunJob = jobs.reduce<CronJob | null>((latest, job) => {
@@ -540,15 +498,13 @@ export function ScheduledTasksSettings() {
 
   return (
     <div style={styles.container}>
-      {/* Header */}
-      <div style={styles.header}>
-        <div style={styles.title}>
-          {Icons.clock}
-          <span>Scheduled Tasks</span>
+      <div className="settings-section">
+        <div className="settings-section-header">
+          <h3>Scheduled Tasks</h3>
         </div>
-        <div style={styles.subtitle}>
+        <p className="settings-description">
           Automate tasks to run on a schedule. Results appear in your workspace.
-        </div>
+        </p>
       </div>
 
       {/* Error Banner */}
@@ -599,18 +555,10 @@ export function ScheduledTasksSettings() {
 
       {/* Add Button */}
       <button
-        style={styles.addButton}
+        className="button-primary button-with-icon scheduled-tasks-add"
         onClick={() => {
           setEditingJob(null);
           setShowCreateModal(true);
-        }}
-        onMouseOver={(e) => {
-          e.currentTarget.style.backgroundColor = 'var(--color-accent-hover)';
-          e.currentTarget.style.transform = 'translateY(-1px)';
-        }}
-        onMouseOut={(e) => {
-          e.currentTarget.style.backgroundColor = 'var(--color-accent)';
-          e.currentTarget.style.transform = 'translateY(0)';
         }}
       >
         {Icons.plus}

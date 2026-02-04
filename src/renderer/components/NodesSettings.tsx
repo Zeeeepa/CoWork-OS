@@ -118,101 +118,75 @@ export function NodesSettings({ compact = false }: NodesSettingsProps) {
   };
 
   if (loading) {
-    return (
-      <div className="flex items-center justify-center py-8">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-accent-500" />
-      </div>
-    );
+    return <div className="settings-loading">Loading companions...</div>;
   }
 
   return (
-    <div className="space-y-4">
-      {/* Header */}
+    <div className="nodes-settings">
       {!compact && (
-        <div className="flex items-center justify-between">
-          <div>
-            <h3 className="text-lg font-medium text-neutral-100">Mobile Companions</h3>
-            <p className="text-sm text-neutral-400 mt-1">
-              Connect iOS or Android devices as mobile companions for device-specific actions.
-            </p>
+        <div className="settings-section nodes-header-section">
+          <div className="settings-section-header">
+            <div>
+              <h3>Mobile Companions</h3>
+              <p className="settings-description">
+                Connect iOS or Android devices as mobile companions for device-specific actions.
+              </p>
+            </div>
+            <button className="button-secondary button-small" onClick={loadNodes}>
+              Refresh
+            </button>
           </div>
-          <button
-            onClick={loadNodes}
-            className="px-3 py-1.5 text-sm text-neutral-300 hover:text-neutral-100 bg-neutral-800 hover:bg-neutral-700 rounded-md transition-colors"
-          >
-            Refresh
-          </button>
         </div>
       )}
 
-      {/* Connection Instructions */}
       {nodes.length === 0 && (
-        <div className="bg-neutral-800/50 rounded-lg p-4 border border-neutral-700">
-          <h4 className="text-sm font-medium text-neutral-200 mb-2">How to Connect</h4>
-          <ol className="text-sm text-neutral-400 space-y-2 list-decimal list-inside">
+        <div className="nodes-empty-card">
+          <h4>How to Connect</h4>
+          <ol>
             <li>Make sure the Control Plane is enabled and running</li>
             <li>Install the companion app on your iOS or Android device</li>
             <li>Enter the gateway URL and authentication token in the app</li>
             <li>The device will appear here once connected</li>
           </ol>
-          <div className="mt-4 p-3 bg-neutral-900/50 rounded-md">
-            <p className="text-xs text-neutral-500 font-mono">
-              For local network: ws://{'<your-mac-ip>'}:18789
+          <div className="nodes-connection-note">
+            <p>
+              <code>For local network: ws://{'<your-mac-ip>'}:18789</code>
             </p>
-            <p className="text-xs text-neutral-500 mt-1">
+            <p>
               For remote access: Enable Tailscale or SSH tunnel in Control Plane settings
             </p>
           </div>
         </div>
       )}
 
-      {/* Node List */}
       {nodes.length > 0 && (
-        <div className="space-y-3">
+        <div className="nodes-list">
           {nodes.map((node) => (
             <div
               key={node.id}
-              className={`bg-neutral-800/50 rounded-lg p-4 border transition-colors cursor-pointer ${
-                selectedNode === node.id
-                  ? 'border-accent-500'
-                  : 'border-neutral-700 hover:border-neutral-600'
-              }`}
+              className={`nodes-card ${selectedNode === node.id ? 'is-active' : ''}`}
               onClick={() => setSelectedNode(selectedNode === node.id ? null : node.id)}
             >
-              {/* Node Header */}
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <span className="text-2xl">{getPlatformIcon(node.platform)}</span>
+              <div className="nodes-card-header">
+                <div className="nodes-card-info">
+                  <span className="nodes-platform-icon">{getPlatformIcon(node.platform)}</span>
                   <div>
-                    <h4 className="text-sm font-medium text-neutral-100">{node.displayName}</h4>
-                    <p className="text-xs text-neutral-500">
+                    <h4 className="nodes-card-title">{node.displayName}</h4>
+                    <p className="nodes-card-subtitle">
                       {node.platform.toUpperCase()} · v{node.version}
                     </p>
                   </div>
                 </div>
-                <div className="flex items-center gap-2">
-                  <span
-                    className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs ${
-                      node.isForeground
-                        ? 'bg-green-500/20 text-green-400'
-                        : 'bg-yellow-500/20 text-yellow-400'
-                    }`}
-                  >
-                    {node.isForeground ? 'Foreground' : 'Background'}
-                  </span>
-                </div>
+                <span className={`nodes-status ${node.isForeground ? 'foreground' : 'background'}`}>
+                  {node.isForeground ? 'Foreground' : 'Background'}
+                </span>
               </div>
 
-              {/* Capabilities */}
-              <div className="mt-3 flex flex-wrap gap-2">
+              <div className="nodes-capabilities">
                 {node.capabilities.map((cap) => (
                   <span
                     key={cap}
-                    className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs ${
-                      node.permissions?.[cap]
-                        ? 'bg-neutral-700 text-neutral-300'
-                        : 'bg-neutral-800 text-neutral-500'
-                    }`}
+                    className={`nodes-capability ${node.permissions?.[cap] ? '' : 'denied'}`}
                     title={node.permissions?.[cap] ? 'Permission granted' : 'Permission not granted'}
                   >
                     {getCapabilityIcon(cap)} {cap}
@@ -221,33 +195,30 @@ export function NodesSettings({ compact = false }: NodesSettingsProps) {
                 ))}
               </div>
 
-              {/* Expanded Details */}
               {selectedNode === node.id && (
-                <div className="mt-4 pt-4 border-t border-neutral-700 space-y-4">
-                  {/* Connection Info */}
-                  <div className="grid grid-cols-2 gap-4 text-xs">
-                    <div>
-                      <span className="text-neutral-500">Node ID</span>
-                      <p className="text-neutral-300 font-mono mt-0.5 truncate">{node.id}</p>
+                <div className="nodes-details">
+                  <div className="nodes-detail-grid">
+                    <div className="nodes-detail">
+                      <span className="nodes-detail-label">Node ID</span>
+                      <span className="nodes-detail-value nodes-detail-mono">{node.id}</span>
                     </div>
-                    <div>
-                      <span className="text-neutral-500">Device ID</span>
-                      <p className="text-neutral-300 font-mono mt-0.5 truncate">{node.deviceId || 'N/A'}</p>
+                    <div className="nodes-detail">
+                      <span className="nodes-detail-label">Device ID</span>
+                      <span className="nodes-detail-value nodes-detail-mono">{node.deviceId || 'N/A'}</span>
                     </div>
-                    <div>
-                      <span className="text-neutral-500">Connected</span>
-                      <p className="text-neutral-300 mt-0.5">{formatTimestamp(node.connectedAt)}</p>
+                    <div className="nodes-detail">
+                      <span className="nodes-detail-label">Connected</span>
+                      <span className="nodes-detail-value">{formatTimestamp(node.connectedAt)}</span>
                     </div>
-                    <div>
-                      <span className="text-neutral-500">Last Activity</span>
-                      <p className="text-neutral-300 mt-0.5">{formatTimestamp(node.lastActivityAt)}</p>
+                    <div className="nodes-detail">
+                      <span className="nodes-detail-label">Last Activity</span>
+                      <span className="nodes-detail-value">{formatTimestamp(node.lastActivityAt)}</span>
                     </div>
                   </div>
 
-                  {/* Test Commands */}
-                  <div>
-                    <h5 className="text-xs font-medium text-neutral-400 mb-2">Test Commands</h5>
-                    <div className="flex flex-wrap gap-2">
+                  <div className="nodes-test">
+                    <h5>Test Commands</h5>
+                    <div className="nodes-test-actions">
                       {node.commands.slice(0, 6).map((cmd) => (
                         <button
                           key={cmd}
@@ -256,7 +227,7 @@ export function NodesSettings({ compact = false }: NodesSettingsProps) {
                             handleTestCommand(node.id, cmd);
                           }}
                           disabled={testingCommand === `${node.id}:${cmd}`}
-                          className="px-2 py-1 text-xs bg-neutral-700 hover:bg-neutral-600 text-neutral-300 rounded disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                          className="nodes-command-btn"
                         >
                           {testingCommand === `${node.id}:${cmd}` ? 'Testing...' : cmd}
                         </button>
@@ -264,25 +235,16 @@ export function NodesSettings({ compact = false }: NodesSettingsProps) {
                     </div>
                   </div>
 
-                  {/* Test Result */}
                   {testResult && testResult.nodeId === node.id && (
-                    <div
-                      className={`p-3 rounded text-xs ${
-                        testResult.result.ok
-                          ? 'bg-green-500/10 border border-green-500/30 text-green-400'
-                          : 'bg-red-500/10 border border-red-500/30 text-red-400'
-                      }`}
-                    >
-                      <p className="font-medium">
+                    <div className={`nodes-result ${testResult.result.ok ? 'success' : 'error'}`}>
+                      <p className="nodes-result-title">
                         {testResult.command}: {testResult.result.ok ? 'Success' : 'Failed'}
                       </p>
                       {testResult.result.error && (
-                        <p className="mt-1 text-red-300">
-                          {testResult.result.error.message}
-                        </p>
+                        <p className="nodes-result-error">{testResult.result.error.message}</p>
                       )}
                       {testResult.result.ok && testResult.result.payload != null && (
-                        <pre className="mt-2 p-2 bg-neutral-900/50 rounded overflow-auto max-h-32">
+                        <pre className="nodes-result-pre">
                           {(() => {
                             try {
                               return JSON.stringify(testResult.result.payload, null, 2).slice(0, 500);
@@ -301,14 +263,11 @@ export function NodesSettings({ compact = false }: NodesSettingsProps) {
         </div>
       )}
 
-      {/* Status Summary */}
       {nodes.length > 0 && !compact && (
-        <div className="mt-4 p-3 bg-neutral-800/30 rounded-lg border border-neutral-700/50">
-          <p className="text-xs text-neutral-400">
-            <span className="text-accent-400 font-medium">{nodes.length}</span> companion{nodes.length !== 1 ? 's' : ''} connected
-            {' · '}
-            <span className="text-green-400">{nodes.filter(n => n.isForeground).length}</span> in foreground
-          </p>
+        <div className="nodes-summary">
+          <span className="nodes-summary-count">{nodes.length}</span> companion{nodes.length !== 1 ? 's' : ''} connected
+          {' · '}
+          <span className="nodes-summary-highlight">{nodes.filter(n => n.isForeground).length}</span> in foreground
         </div>
       )}
     </div>

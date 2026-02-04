@@ -136,102 +136,88 @@ export function SkillHubBrowser({ onSkillInstalled, onClose }: SkillHubBrowserPr
 
   const getStatusBadge = (entry: SkillStatusEntry) => {
     if (entry.eligible) {
-      return <span className="badge badge-success">Ready</span>;
+      return <span className="settings-badge settings-badge--success">Ready</span>;
     }
     if (entry.disabled) {
-      return <span className="badge badge-warning">Disabled</span>;
+      return <span className="settings-badge settings-badge--warning">Disabled</span>;
     }
     if (entry.blockedByAllowlist) {
-      return <span className="badge badge-error">Blocked</span>;
+      return <span className="settings-badge settings-badge--error">Blocked</span>;
     }
-    return <span className="badge badge-ghost">Missing Requirements</span>;
+    return <span className="settings-badge settings-badge--neutral">Missing Requirements</span>;
   };
 
   const renderBrowseTab = () => (
-    <div className="space-y-4">
-      {/* Search */}
-      <div className="flex gap-2">
+    <div className="skillhub-tab">
+      <div className="input-with-button">
         <input
           type="text"
           placeholder="Search skills..."
-          className="input input-bordered flex-1"
+          className="settings-input"
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
         />
         <button
-          className="btn btn-primary"
+          className="button-secondary button-small"
           onClick={handleSearch}
           disabled={isSearching}
         >
-          {isSearching ? (
-            <span className="loading loading-spinner loading-sm" />
-          ) : (
-            'Search'
-          )}
+          {isSearching ? 'Searching...' : 'Search'}
         </button>
       </div>
 
-      {/* Search Results */}
       {searchResults.length > 0 ? (
-        <div className="space-y-2">
+        <div className="skillhub-list">
           {searchResults.map((skill) => (
             <div
               key={skill.id}
-              className={`card bg-base-200 cursor-pointer hover:bg-base-300 transition-colors ${
-                selectedSkill?.id === skill.id ? 'ring-2 ring-primary' : ''
-              }`}
+              className={`settings-card skillhub-card ${selectedSkill?.id === skill.id ? 'is-selected' : ''}`}
               onClick={() => setSelectedSkill(skill)}
             >
-              <div className="card-body p-4">
-                <div className="flex items-start justify-between">
-                  <div className="flex items-center gap-2">
-                    <span className="text-2xl">{skill.icon || '📦'}</span>
+              <div className="skillhub-card-header">
+                <div className="skillhub-card-info">
+                  <span className="skillhub-icon">{skill.icon || '📦'}</span>
                     <div>
-                      <h3 className="font-semibold">{skill.name}</h3>
-                      <p className="text-sm text-base-content/70">{skill.description}</p>
+                      <div className="skillhub-title-row">
+                        <h4 className="skillhub-title">{skill.name}</h4>
+                      </div>
+                      <p className="settings-description skillhub-description">{skill.description}</p>
                     </div>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    {installedSkills.has(skill.id) ? (
-                      <span className="badge badge-success">Installed</span>
-                    ) : (
-                      <button
-                        className="btn btn-primary btn-sm"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleInstall(skill.id);
-                        }}
-                        disabled={installing === skill.id}
-                      >
-                        {installing === skill.id ? (
-                          <span className="loading loading-spinner loading-xs" />
-                        ) : (
-                          'Install'
-                        )}
-                      </button>
-                    )}
-                  </div>
                 </div>
-                {skill.tags && skill.tags.length > 0 && (
-                  <div className="flex flex-wrap gap-1 mt-2">
-                    {skill.tags.map((tag) => (
-                      <span key={tag} className="badge badge-outline badge-sm">
-                        {tag}
-                      </span>
-                    ))}
-                  </div>
-                )}
+                <div className="skillhub-card-actions">
+                  {installedSkills.has(skill.id) ? (
+                    <span className="settings-badge settings-badge--success">Installed</span>
+                  ) : (
+                    <button
+                      className="button-primary button-small"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleInstall(skill.id);
+                      }}
+                      disabled={installing === skill.id}
+                    >
+                      {installing === skill.id ? 'Installing...' : 'Install'}
+                    </button>
+                  )}
+                </div>
               </div>
+              {skill.tags && skill.tags.length > 0 && (
+                <div className="skillhub-tags">
+                  {skill.tags.map((tag) => (
+                    <span key={tag} className="settings-badge settings-badge--outline">
+                      {tag}
+                    </span>
+                  ))}
+                </div>
+              )}
             </div>
           ))}
         </div>
       ) : searchQuery && !isSearching ? (
-        <div className="text-center py-8 text-base-content/50">
-          No skills found. Try a different search term.
-        </div>
+        <div className="settings-empty">No skills found. Try a different search term.</div>
       ) : (
-        <div className="text-center py-8 text-base-content/50">
+        <div className="settings-empty">
           Search the SkillHub registry to discover and install new skills.
         </div>
       )}
@@ -242,67 +228,58 @@ export function SkillHubBrowser({ onSkillInstalled, onClose }: SkillHubBrowserPr
     const managedSkills = skillStatus?.skills.filter(s => s.source === 'managed') || [];
 
     return (
-      <div className="space-y-4">
-        <div className="flex justify-between items-center">
-          <h3 className="font-semibold">Installed from Registry</h3>
-          <button className="btn btn-ghost btn-sm" onClick={handleOpenFolder}>
-            Open Folder
-          </button>
+      <div className="skillhub-tab">
+        <div className="settings-section-header">
+          <h3>Installed from Registry</h3>
+          <div className="settings-section-actions">
+            <button className="button-secondary button-small" onClick={handleOpenFolder}>
+              Open Folder
+            </button>
+          </div>
         </div>
 
         {managedSkills.length > 0 ? (
-          <div className="space-y-2">
+          <div className="skillhub-list">
             {managedSkills.map((skill) => (
-              <div key={skill.id} className="card bg-base-200">
-                <div className="card-body p-4">
-                  <div className="flex items-start justify-between">
-                    <div className="flex items-center gap-2">
-                      <span className="text-2xl">{skill.icon || '📦'}</span>
-                      <div>
-                        <div className="flex items-center gap-2">
-                          <h3 className="font-semibold">{skill.name}</h3>
-                          {getStatusBadge(skill)}
-                        </div>
-                        <p className="text-sm text-base-content/70">{skill.description}</p>
-                        {skill.metadata?.version && (
-                          <p className="text-xs text-base-content/50">v{skill.metadata.version}</p>
-                        )}
+              <div key={skill.id} className="settings-card skillhub-card">
+                <div className="skillhub-card-header">
+                  <div className="skillhub-card-info">
+                    <span className="skillhub-icon">{skill.icon || '📦'}</span>
+                    <div>
+                      <div className="skillhub-title-row">
+                        <h4 className="skillhub-title">{skill.name}</h4>
+                        {getStatusBadge(skill)}
                       </div>
-                    </div>
-                    <button
-                      className="btn btn-ghost btn-sm text-error"
-                      onClick={() => handleUninstall(skill.id)}
-                      disabled={installing === skill.id}
-                    >
-                      {installing === skill.id ? (
-                        <span className="loading loading-spinner loading-xs" />
-                      ) : (
-                        'Uninstall'
+                      <p className="settings-description skillhub-description">{skill.description}</p>
+                      {skill.metadata?.version && (
+                        <p className="skillhub-meta">v{skill.metadata.version}</p>
                       )}
-                    </button>
+                    </div>
                   </div>
-
-                  {/* Missing requirements */}
-                  {!skill.eligible && (
-                    <div className="mt-2 text-sm">
-                      {skill.missing.bins.length > 0 && (
-                        <p className="text-warning">
-                          Missing binaries: {skill.missing.bins.join(', ')}
-                        </p>
-                      )}
-                      {skill.missing.env.length > 0 && (
-                        <p className="text-warning">
-                          Missing env vars: {skill.missing.env.join(', ')}
-                        </p>
-                      )}
-                    </div>
-                  )}
+                  <button
+                    className="button-danger button-small"
+                    onClick={() => handleUninstall(skill.id)}
+                    disabled={installing === skill.id}
+                  >
+                    {installing === skill.id ? 'Uninstalling...' : 'Uninstall'}
+                  </button>
                 </div>
+
+                {!skill.eligible && (
+                  <div className="skillhub-warnings">
+                    {skill.missing.bins.length > 0 && (
+                      <p>Missing binaries: {skill.missing.bins.join(', ')}</p>
+                    )}
+                    {skill.missing.env.length > 0 && (
+                      <p>Missing env vars: {skill.missing.env.join(', ')}</p>
+                    )}
+                  </div>
+                )}
               </div>
             ))}
           </div>
         ) : (
-          <div className="text-center py-8 text-base-content/50">
+          <div className="settings-empty">
             No skills installed from registry yet.
             <br />
             Browse the registry to discover and install skills.
@@ -315,59 +292,53 @@ export function SkillHubBrowser({ onSkillInstalled, onClose }: SkillHubBrowserPr
   const renderStatusTab = () => {
     if (!skillStatus) {
       return (
-        <div className="text-center py-8">
-          <span className="loading loading-spinner" />
-        </div>
+        <div className="settings-empty">Loading skill status...</div>
       );
     }
 
     return (
-      <div className="space-y-4">
-        {/* Summary */}
-        <div className="stats stats-vertical lg:stats-horizontal shadow w-full">
-          <div className="stat">
-            <div className="stat-title">Total Skills</div>
+      <div className="skillhub-tab">
+        <div className="stats-grid">
+          <div className="stat-card">
+            <div className="stat-label">Total Skills</div>
             <div className="stat-value">{skillStatus.summary.total}</div>
           </div>
-          <div className="stat">
-            <div className="stat-title">Ready</div>
-            <div className="stat-value text-success">{skillStatus.summary.eligible}</div>
+          <div className="stat-card">
+            <div className="stat-label">Ready</div>
+            <div className="stat-value stat-value--success">{skillStatus.summary.eligible}</div>
           </div>
-          <div className="stat">
-            <div className="stat-title">Disabled</div>
-            <div className="stat-value text-warning">{skillStatus.summary.disabled}</div>
+          <div className="stat-card">
+            <div className="stat-label">Disabled</div>
+            <div className="stat-value stat-value--warning">{skillStatus.summary.disabled}</div>
           </div>
-          <div className="stat">
-            <div className="stat-title">Missing Deps</div>
-            <div className="stat-value text-error">{skillStatus.summary.missingRequirements}</div>
+          <div className="stat-card">
+            <div className="stat-label">Missing Deps</div>
+            <div className="stat-value stat-value--error">{skillStatus.summary.missingRequirements}</div>
           </div>
         </div>
 
-        {/* All Skills by Source */}
         {['bundled', 'managed', 'workspace'].map((source) => {
           const skills = skillStatus.skills.filter(s => s.source === source);
           if (skills.length === 0) return null;
 
           return (
-            <div key={source} className="collapse collapse-arrow bg-base-200">
-              <input type="checkbox" defaultChecked={source !== 'bundled'} />
-              <div className="collapse-title font-medium capitalize">
-                {source} Skills ({skills.length})
-              </div>
-              <div className="collapse-content">
-                <div className="space-y-2 pt-2">
-                  {skills.map((skill) => (
-                    <div key={skill.id} className="flex items-center justify-between py-2 border-b border-base-300 last:border-0">
-                      <div className="flex items-center gap-2">
-                        <span>{skill.icon || '📦'}</span>
-                        <span className="font-medium">{skill.name}</span>
-                      </div>
-                      {getStatusBadge(skill)}
+            <details key={source} className="skillhub-group" open={source !== 'bundled'}>
+              <summary>
+                <span className="skillhub-group-title">{source} Skills</span>
+                <span className="settings-badge settings-badge--neutral">{skills.length}</span>
+              </summary>
+              <div className="skillhub-group-content">
+                {skills.map((skill) => (
+                  <div key={skill.id} className="skillhub-group-item">
+                    <div className="skillhub-group-info">
+                      <span>{skill.icon || '📦'}</span>
+                      <span>{skill.name}</span>
                     </div>
-                  ))}
-                </div>
+                    {getStatusBadge(skill)}
+                  </div>
+                ))}
               </div>
-            </div>
+            </details>
           );
         })}
       </div>
@@ -376,79 +347,67 @@ export function SkillHubBrowser({ onSkillInstalled, onClose }: SkillHubBrowserPr
 
   // Show initial loading state
   if (isLoadingStatus) {
-    return (
-      <div className="flex flex-col h-full items-center justify-center">
-        <span className="loading loading-spinner loading-lg" />
-        <p className="mt-4 text-base-content/70">Loading skills...</p>
-      </div>
-    );
+    return <div className="settings-loading">Loading skills...</div>;
   }
 
   return (
-    <div className="flex flex-col h-full">
-      {/* Header */}
-      <div className="flex items-center justify-between mb-4">
-        <div className="flex items-center gap-2">
-          <h2 className="text-xl font-bold">SkillHub</h2>
-          {isRefreshing && (
-            <span className="loading loading-spinner loading-sm" />
-          )}
-        </div>
-        <div className="flex items-center gap-2">
-          <button
-            className="btn btn-ghost btn-sm"
-            onClick={handleRefresh}
-            disabled={isRefreshing}
-            title="Refresh skill status"
-          >
-            {isRefreshing ? (
-              <span className="loading loading-spinner loading-xs" />
-            ) : (
-              '↻'
-            )}
-          </button>
-          {onClose && (
-            <button className="btn btn-ghost btn-sm" onClick={onClose}>
-              Close
+    <div className="skillhub-settings">
+      <div className="settings-section">
+        <div className="settings-section-header">
+          <div>
+            <h3>SkillHub</h3>
+            <p className="settings-description">
+              Search the SkillHub registry to discover and install new skills.
+            </p>
+          </div>
+          <div className="settings-section-actions">
+            <button
+              className="button-secondary button-small"
+              onClick={handleRefresh}
+              disabled={isRefreshing}
+            >
+              {isRefreshing ? 'Refreshing...' : 'Refresh'}
             </button>
-          )}
+            {onClose && (
+              <button className="button-secondary button-small" onClick={onClose}>
+                Close
+              </button>
+            )}
+          </div>
         </div>
       </div>
 
-      {/* Error Alert */}
       {error && (
-        <div className="alert alert-error mb-4">
+        <div className="settings-alert settings-alert-error">
           <span>{error}</span>
-          <button className="btn btn-ghost btn-sm" onClick={() => setError(null)}>
+          <button className="button-secondary button-small" onClick={() => setError(null)}>
             Dismiss
           </button>
         </div>
       )}
 
-      {/* Tabs */}
-      <div className="tabs tabs-boxed mb-4">
+      <div className="settings-tabs">
         <button
-          className={`tab ${activeTab === 'installed' ? 'tab-active' : ''}`}
+          className={`settings-tab ${activeTab === 'installed' ? 'active' : ''}`}
           onClick={() => setActiveTab('installed')}
         >
           Installed
         </button>
         <button
-          className={`tab ${activeTab === 'browse' ? 'tab-active' : ''}`}
+          className={`settings-tab ${activeTab === 'browse' ? 'active' : ''}`}
           onClick={() => setActiveTab('browse')}
         >
           Browse Registry
         </button>
         <button
-          className={`tab ${activeTab === 'status' ? 'tab-active' : ''}`}
+          className={`settings-tab ${activeTab === 'status' ? 'active' : ''}`}
           onClick={() => setActiveTab('status')}
         >
           Status
         </button>
       </div>
 
-      {/* Tab Content */}
-      <div className="flex-1 overflow-y-auto">
+      <div className="skillhub-tab-content">
         {activeTab === 'browse' && renderBrowseTab()}
         {activeTab === 'installed' && renderInstalledTab()}
         {activeTab === 'status' && renderStatusTab()}
