@@ -164,6 +164,29 @@ export class MessageRouter {
     return DEFAULT_CHANNEL_CONTEXT;
   }
 
+  private normalizeSimpleChannelMessage(text: string, context: ChannelMessageContext): string {
+    if (!text) return text;
+
+    let normalized = text;
+    const signOff = context.quirks?.signOff?.trim();
+
+    if (signOff) {
+      const escaped = signOff.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const signOffRegex = new RegExp(`(?:\\s|\\n)*${escaped}\\s*$`, 'i');
+      const withoutSignOff = normalized.replace(signOffRegex, '').trimEnd();
+      if (withoutSignOff.length > 0) {
+        normalized = withoutSignOff;
+      }
+    }
+
+    normalized = normalized.replace(/[ \t]+$/g, '');
+    if (normalized.endsWith(':')) {
+      normalized = normalized.slice(0, -1).trimEnd();
+    }
+
+    return normalized;
+  }
+
   private getUiCopy(
     key: Parameters<typeof getChannelUiCopy>[0],
     replacements?: Record<string, string | number>
@@ -1134,6 +1157,7 @@ export class MessageRouter {
       'anthropic': 'Claude',
       'bedrock': 'Claude',
       'openai': 'OpenAI',
+      'azure': 'Azure OpenAI',
       'gemini': 'Gemini',
       'openrouter': 'OpenRouter',
       'ollama': 'Ollama',
@@ -1161,6 +1185,19 @@ export class MessageRouter {
             { key: 'o1', displayName: 'o1' },
             { key: 'o1-mini', displayName: 'o1 Mini' },
           ];
+        }
+        break;
+      }
+
+      case 'azure': {
+        const deployments = (settings.azure?.deployments || []).filter(Boolean);
+        currentModel = settings.azure?.deployment || deployments[0] || 'deployment-name';
+        models = deployments.map((deployment) => ({
+          key: deployment,
+          displayName: deployment,
+        }));
+        if (currentModel && !models.some(m => m.key === currentModel)) {
+          models.unshift({ key: currentModel, displayName: currentModel });
         }
         break;
       }
@@ -1449,6 +1486,13 @@ export class MessageRouter {
         };
         break;
 
+      case 'azure':
+        newSettings.azure = {
+          ...settings.azure,
+          deployment: result.model!.key,
+        };
+        break;
+
       case 'gemini':
         newSettings.gemini = {
           ...settings.gemini,
@@ -1509,10 +1553,11 @@ export class MessageRouter {
       text += '*Available Providers:*\n';
       text += '1. anthropic - Anthropic API (direct)\n';
       text += '2. openai - OpenAI/ChatGPT\n';
-      text += '3. gemini - Google Gemini\n';
-      text += '4. openrouter - OpenRouter\n';
-      text += '5. bedrock - AWS Bedrock\n';
-      text += '6. ollama - Ollama (local)\n\n';
+      text += '3. azure - Azure OpenAI\n';
+      text += '4. gemini - Google Gemini\n';
+      text += '5. openrouter - OpenRouter\n';
+      text += '6. bedrock - AWS Bedrock\n';
+      text += '7. ollama - Ollama (local)\n\n';
 
       text += '💡 Use `/provider <name>` to switch\n';
       text += 'Example: `/provider bedrock` or `/provider 2`';
@@ -1535,16 +1580,19 @@ export class MessageRouter {
       '2': 'openai',
       'openai': 'openai',
       'chatgpt': 'openai',
-      '3': 'gemini',
+      '3': 'azure',
+      'azure': 'azure',
+      'azure-openai': 'azure',
+      '4': 'gemini',
       'gemini': 'gemini',
       'google': 'gemini',
-      '4': 'openrouter',
+      '5': 'openrouter',
       'openrouter': 'openrouter',
       'or': 'openrouter',
-      '5': 'bedrock',
+      '6': 'bedrock',
       'bedrock': 'bedrock',
       'aws': 'bedrock',
-      '6': 'ollama',
+      '7': 'ollama',
       'ollama': 'ollama',
       'local': 'ollama',
     };
@@ -1553,7 +1601,7 @@ export class MessageRouter {
     if (!targetProvider) {
       await adapter.sendMessage({
         chatId: message.chatId,
-        text: `❌ Unknown provider: "${args[0]}"\n\n*Available providers:*\n1. anthropic\n2. openai\n3. gemini\n4. openrouter\n5. bedrock\n6. ollama\n\nUse \`/provider <name>\` or \`/provider <number>\``,
+        text: `❌ Unknown provider: "${args[0]}"\n\n*Available providers:*\n1. anthropic\n2. openai\n3. azure\n4. gemini\n5. openrouter\n6. bedrock\n7. ollama\n\nUse \`/provider <name>\` or \`/provider <number>\``,
         parseMode: 'markdown',
       });
       return;
@@ -1959,6 +2007,9 @@ export class MessageRouter {
     }
 
     try {
+      if (pending.adapter.type === 'whatsapp') {
+        text = this.normalizeSimpleChannelMessage(text, this.getMessageContext());
+      }
       // Use draft streaming for Telegram when streaming content
       if (isStreaming && pending.adapter instanceof TelegramAdapter) {
         await pending.adapter.updateDraftStream(pending.chatId, text);
@@ -2012,6 +2063,9 @@ export class MessageRouter {
       const isSimpleMessaging = pending.adapter.type === 'whatsapp' || pending.adapter.type === 'imessage';
       const msgCtx = this.getMessageContext();
       const message = getCompletionMessage(msgCtx, result, !isSimpleMessaging);
+      const normalizedMessage = pending.adapter.type === 'whatsapp'
+        ? this.normalizeSimpleChannelMessage(message, msgCtx)
+        : message;
 
       // Finalize draft stream if using Telegram
       if (pending.adapter instanceof TelegramAdapter) {
@@ -2025,7 +2079,7 @@ export class MessageRouter {
       } else {
         // Split long messages (Telegram has 4096 char limit, WhatsApp/iMessage ~65k but keep it reasonable)
         const maxLen = isSimpleMessaging ? 4000 : 4000;
-        const chunks = this.splitMessage(message, maxLen);
+        const chunks = this.splitMessage(normalizedMessage, maxLen);
         for (const chunk of chunks) {
           await pending.adapter.sendMessage({
             chatId: pending.chatId,
@@ -2700,7 +2754,7 @@ ${status.queuedCount > 0 ? `Queued task IDs: ${status.queuedTaskIds.join(', ')}`
     const row2: InlineKeyboardButton[] = [];
 
     // Get configured providers for the keyboard
-    const providerOrder: LLMProviderType[] = ['anthropic', 'openai', 'gemini', 'bedrock', 'openrouter', 'ollama'];
+    const providerOrder: LLMProviderType[] = ['anthropic', 'openai', 'azure', 'gemini', 'bedrock', 'openrouter', 'ollama'];
 
     for (let i = 0; i < providerOrder.length; i++) {
       const provider = providerOrder[i];
@@ -3087,6 +3141,9 @@ Node.js: \`${nodeVersion}\`
     switch (providerType) {
       case 'openai':
         newSettings.openai = { ...settings.openai, model: modelKey };
+        break;
+      case 'azure':
+        newSettings.azure = { ...settings.azure, deployment: modelKey };
         break;
       case 'gemini':
         newSettings.gemini = { ...settings.gemini, model: modelKey };

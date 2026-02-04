@@ -136,6 +136,14 @@ export const OpenAISettingsSchema = z.object({
   authMethod: z.enum(['api_key', 'oauth']).optional(),
 }).optional();
 
+export const AzureSettingsSchema = z.object({
+  apiKey: z.string().max(500).optional(),
+  endpoint: z.string().max(500).optional(),
+  deployment: z.string().max(200).optional(),
+  deployments: z.array(z.string().max(200)).max(50).optional(),
+  apiVersion: z.string().max(200).optional(),
+}).optional();
+
 export const GroqSettingsSchema = z.object({
   apiKey: z.string().max(500).optional(),
   model: z.string().max(200).optional(),
@@ -171,6 +179,7 @@ export const LLMSettingsSchema = z.object({
   gemini: GeminiSettingsSchema,
   openrouter: OpenRouterSettingsSchema,
   openai: OpenAISettingsSchema,
+  azure: AzureSettingsSchema,
   groq: GroqSettingsSchema,
   xai: XAISettingsSchema,
   kimi: KimiSettingsSchema,

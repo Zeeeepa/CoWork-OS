@@ -348,6 +348,7 @@ export class MemoryService {
       // Get LLM provider for compression
       const provider = LLMProviderFactory.createProvider();
       const settings = LLMProviderFactory.getSettings();
+      const azureDeployment = settings.azure?.deployment || settings.azure?.deployments?.[0];
       const modelId = LLMProviderFactory.getModelId(
         settings.modelKey,
         settings.providerType,
@@ -355,6 +356,7 @@ export class MemoryService {
         settings.gemini?.model,
         settings.openrouter?.model,
         settings.openai?.model,
+        azureDeployment,
         settings.groq?.model,
         settings.xai?.model,
         settings.kimi?.model,

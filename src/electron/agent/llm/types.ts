@@ -32,6 +32,11 @@ export interface LLMProviderConfig {
   openaiAccessToken?: string; // OAuth access token
   openaiRefreshToken?: string; // OAuth refresh token
   openaiTokenExpiresAt?: number; // OAuth token expiry timestamp
+  // Azure OpenAI-specific
+  azureApiKey?: string;
+  azureEndpoint?: string;
+  azureDeployment?: string;
+  azureApiVersion?: string;
   // Groq-specific
   groqApiKey?: string;
   groqBaseUrl?: string;

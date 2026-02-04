@@ -23,6 +23,7 @@ function getModelIdWithCustomProviders(
     undefined,
     undefined,
     undefined,
+    undefined,
     customProviders
   );
 }
@@ -66,5 +67,23 @@ describe('LLMProviderFactory custom provider config resolution', () => {
 
     expect(modelId).toBe('resolved-model');
     expect(logSpy).not.toHaveBeenCalled();
+  });
+
+  it('uses Azure deployment name when provider type is azure', () => {
+    const modelId = LLMProviderFactory.getModelId(
+      dummyModelKey,
+      'azure',
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      'my-deployment',
+      undefined,
+      undefined,
+      undefined,
+      undefined
+    );
+
+    expect(modelId).toBe('my-deployment');
   });
 });

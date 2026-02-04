@@ -1627,6 +1627,7 @@ export const BUILTIN_LLM_PROVIDER_TYPES = [
   'gemini',
   'openrouter',
   'openai',
+  'azure',
   'groq',
   'xai',
   'kimi',
@@ -1714,6 +1715,13 @@ export interface LLMSettingsData {
     refreshToken?: string;
     tokenExpiresAt?: number;
     authMethod?: 'api_key' | 'oauth';
+  };
+  azure?: {
+    apiKey?: string;
+    endpoint?: string;
+    deployment?: string;
+    deployments?: string[];
+    apiVersion?: string;
   };
   groq?: {
     apiKey?: string;

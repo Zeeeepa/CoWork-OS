@@ -5,6 +5,7 @@ export { OllamaProvider } from './ollama-provider';
 export { GeminiProvider } from './gemini-provider';
 export { OpenRouterProvider } from './openrouter-provider';
 export { OpenAIProvider } from './openai-provider';
+export { AzureOpenAIProvider } from './azure-openai-provider';
 export { GroqProvider } from './groq-provider';
 export { XAIProvider } from './xai-provider';
 export { KimiProvider } from './kimi-provider';

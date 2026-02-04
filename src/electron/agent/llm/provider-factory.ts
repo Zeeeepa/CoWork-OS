@@ -16,6 +16,7 @@ import { OllamaProvider } from './ollama-provider';
 import { GeminiProvider } from './gemini-provider';
 import { OpenRouterProvider } from './openrouter-provider';
 import { OpenAIProvider } from './openai-provider';
+import { AzureOpenAIProvider } from './azure-openai-provider';
 import { GroqProvider } from './groq-provider';
 import { XAIProvider } from './xai-provider';
 import { KimiProvider } from './kimi-provider';
@@ -262,6 +263,13 @@ function sanitizeSettings(settings: LLMSettings): LLMSettings {
     };
   }
 
+  if (sanitized.azure) {
+    sanitized.azure = {
+      ...sanitized.azure,
+      apiKey: decryptSecret(sanitized.azure.apiKey),
+    };
+  }
+
   if (sanitized.groq) {
     sanitized.groq = {
       ...sanitized.groq,
@@ -349,6 +357,13 @@ export interface LLMSettings {
     refreshToken?: string;
     tokenExpiresAt?: number;
     authMethod?: 'api_key' | 'oauth';
+  };
+  azure?: {
+    apiKey?: string;
+    endpoint?: string;
+    deployment?: string;
+    deployments?: string[];
+    apiVersion?: string;
   };
   groq?: {
     apiKey?: string;
@@ -541,6 +556,10 @@ export class LLMProviderFactory {
     if (settings.openai?.apiKey || settings.openai?.accessToken) {
       return 'openai';
     }
+    const azureDeployment = settings.azure?.deployment || settings.azure?.deployments?.[0];
+    if (settings.azure?.apiKey && settings.azure?.endpoint && azureDeployment) {
+      return 'azure';
+    }
     if (settings.groq?.apiKey) {
       return 'groq';
     }
@@ -609,6 +628,9 @@ export class LLMProviderFactory {
     const settings = this.loadSettings();
     const providerType = overrideConfig?.type || settings.providerType;
     const customConfig = getCustomProviderConfig(settings.customProviders, providerType);
+    const azureDeployment = overrideConfig?.azureDeployment
+      || settings.azure?.deployment
+      || settings.azure?.deployments?.[0];
 
     const config: LLMProviderConfig = {
       type: providerType,
@@ -619,6 +641,7 @@ export class LLMProviderFactory {
         settings.gemini?.model,
         settings.openrouter?.model,
         settings.openai?.model,
+        azureDeployment,
         settings.groq?.model,
         settings.xai?.model,
         settings.kimi?.model,
@@ -645,6 +668,11 @@ export class LLMProviderFactory {
       openaiAccessToken: normalizeSecret(overrideConfig?.openaiAccessToken) || settings.openai?.accessToken,
       openaiRefreshToken: settings.openai?.refreshToken,
       openaiTokenExpiresAt: settings.openai?.tokenExpiresAt,
+      // Azure OpenAI config - from settings only
+      azureApiKey: normalizeSecret(overrideConfig?.azureApiKey) || settings.azure?.apiKey,
+      azureEndpoint: overrideConfig?.azureEndpoint || settings.azure?.endpoint,
+      azureDeployment,
+      azureApiVersion: overrideConfig?.azureApiVersion || settings.azure?.apiVersion,
       // Groq config - from settings only
       groqApiKey: normalizeSecret(overrideConfig?.groqApiKey) || settings.groq?.apiKey,
       groqBaseUrl: overrideConfig?.groqBaseUrl || settings.groq?.baseUrl,
@@ -685,6 +713,8 @@ export class LLMProviderFactory {
         return new OpenRouterProvider(config);
       case 'openai':
         return new OpenAIProvider(config);
+      case 'azure':
+        return new AzureOpenAIProvider(config);
       case 'groq':
         return new GroqProvider(config);
       case 'xai':
@@ -706,6 +736,7 @@ export class LLMProviderFactory {
     geminiModel?: string,
     openrouterModel?: string,
     openaiModel?: string,
+    azureDeployment?: string,
     groqModel?: string,
     xaiModel?: string,
     kimiModel?: string,
@@ -735,6 +766,11 @@ export class LLMProviderFactory {
     // For OpenAI, use the specific model if provided or default
     if (providerType === 'openai') {
       return openaiModel || 'gpt-4o-mini';
+    }
+
+    // For Azure OpenAI, use the deployment name
+    if (providerType === 'azure') {
+      return azureDeployment || '';
     }
 
     // For Groq, use the specific model if provided or default
@@ -808,6 +844,15 @@ export class LLMProviderFactory {
         type: 'openai' as LLMProviderType,
         name: 'OpenAI',
         configured: !!(settings.openai?.apiKey || settings.openai?.accessToken),
+      },
+      {
+        type: 'azure' as LLMProviderType,
+        name: 'Azure OpenAI',
+        configured: !!(
+          settings.azure?.apiKey
+          && settings.azure?.endpoint
+          && (settings.azure?.deployment || settings.azure?.deployments?.length)
+        ),
       },
       {
         type: 'groq' as LLMProviderType,

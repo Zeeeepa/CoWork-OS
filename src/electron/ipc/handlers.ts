@@ -1239,6 +1239,7 @@ export async function setupIpcHandlers(
       gemini: validated.gemini,
       openrouter: validated.openrouter,
       openai: openaiSettings,
+      azure: validated.azure,
       groq: validated.groq,
       xai: validated.xai,
       kimi: validated.kimi,
@@ -1270,6 +1271,7 @@ export async function setupIpcHandlers(
     }
     const resolvedProviderType = resolveCustomProviderId(config.providerType);
     const customProviderConfig = config.customProviders?.[resolvedProviderType] || config.customProviders?.[config.providerType];
+    const azureDeployment = config.azure?.deployment || config.azure?.deployments?.[0];
     const providerConfig: LLMProviderConfig = {
       type: config.providerType,
       model: LLMProviderFactory.getModelId(
@@ -1279,6 +1281,7 @@ export async function setupIpcHandlers(
         config.gemini?.model,
         config.openrouter?.model,
         config.openai?.model,
+        azureDeployment,
         config.groq?.model,
         config.xai?.model,
         config.kimi?.model,
@@ -1298,6 +1301,10 @@ export async function setupIpcHandlers(
       openaiApiKey: config.openai?.apiKey,
       openaiAccessToken: openaiAccessToken,
       openaiRefreshToken: openaiRefreshToken,
+      azureApiKey: config.azure?.apiKey,
+      azureEndpoint: config.azure?.endpoint,
+      azureDeployment: azureDeployment,
+      azureApiVersion: config.azure?.apiVersion,
       groqApiKey: config.groq?.apiKey,
       groqBaseUrl: config.groq?.baseUrl,
       xaiApiKey: config.xai?.apiKey,
@@ -1461,6 +1468,24 @@ export async function setupIpcHandlers(
           break;
         }
 
+        case 'azure': {
+          const deployments = (settings.azure?.deployments || []).filter(Boolean);
+          currentModel = settings.azure?.deployment || deployments[0] || 'deployment-name';
+          models = deployments.map((deployment) => ({
+            key: deployment,
+            displayName: deployment,
+            description: 'Azure OpenAI deployment',
+          }));
+          if (currentModel && !models.some(m => m.key === currentModel)) {
+            models.unshift({
+              key: currentModel,
+              displayName: currentModel,
+              description: 'Selected model',
+            });
+          }
+          break;
+        }
+
         case 'groq': {
           currentModel = settings.groq?.model || 'llama-3.1-8b-instant';
           const cachedGroq = LLMProviderFactory.getCachedModels('groq');
@@ -1573,6 +1598,19 @@ export async function setupIpcHandlers(
           break;
         case 'openai':
           settings.openai = { ...settings.openai, model: modelKey };
+          break;
+        case 'azure':
+          {
+            const existingDeployments = (settings.azure?.deployments || []).filter(Boolean);
+            const nextDeployments = existingDeployments.includes(modelKey)
+              ? existingDeployments
+              : [modelKey, ...existingDeployments];
+            settings.azure = {
+              ...settings.azure,
+              deployment: modelKey,
+              deployments: nextDeployments.length > 0 ? nextDeployments : undefined,
+            };
+          }
           break;
         case 'groq':
           settings.groq = { ...settings.groq, model: modelKey };
