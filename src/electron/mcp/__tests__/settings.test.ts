@@ -128,4 +128,37 @@ describe('MCPSettingsManager batch mode', () => {
 
     expect(writeCount).toBe(1);
   });
+
+  it('should normalize local connector command paths to current runtime', () => {
+    mockStoredSettings = {
+      servers: [
+        {
+          id: 'salesforce-1',
+          name: 'Salesforce',
+          enabled: true,
+          transport: 'stdio',
+          command: '/Users/example/project/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron',
+          args: [
+            '--runAsNode',
+            '/Users/example/project/connectors/salesforce-mcp/dist/index.js',
+          ],
+        },
+      ],
+      autoConnect: true,
+      toolNamePrefix: 'mcp_',
+      maxReconnectAttempts: 5,
+      reconnectDelayMs: 1000,
+      registryEnabled: true,
+      registryUrl: 'https://registry.modelcontextprotocol.io/servers.json',
+      hostEnabled: false,
+    };
+
+    const settings = MCPSettingsManager.loadSettings();
+    const server = settings.servers[0];
+
+    expect(server.command).toBe(process.execPath);
+    expect(server.args?.[0]).toBe('--runAsNode');
+    expect(server.args?.[1]).toContain('/connectors/salesforce-mcp/dist/index.js');
+    expect(writeCount).toBe(1);
+  });
 });

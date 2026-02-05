@@ -20,6 +20,63 @@ import { SecureSettingsRepository } from '../database/SecureSettingsRepository';
 const LEGACY_SETTINGS_FILE = 'mcp-settings.json';
 const MASKED_VALUE = '***configured***';
 const ENCRYPTED_PREFIX = 'encrypted:';
+const CONNECTOR_SCRIPT_PATH_REGEX = /(?:^|[\\/])connectors[\\/]([^\\/]+)[\\/]dist[\\/]index\.js$/;
+
+function arraysEqual(a: string[], b: string[]): boolean {
+  if (a.length !== b.length) return false;
+  return a.every((value, index) => value === b[index]);
+}
+
+function getConnectorScriptPathForCurrentRuntime(connectorName: string): string {
+  const baseDir = app.isPackaged
+    ? path.join(process.resourcesPath, 'connectors')
+    : path.join(process.cwd(), 'connectors');
+  return path.join(baseDir, connectorName, 'dist', 'index.js');
+}
+
+/**
+ * Normalize local connector runtime settings.
+ * This fixes stale configs that point to a development Electron binary
+ * (node_modules/electron) which can surface extra Electron dock icons on macOS.
+ */
+function normalizeConnectorRuntime(server: MCPServerConfig): {
+  server: MCPServerConfig;
+  changed: boolean;
+} {
+  if (server.transport !== 'stdio' || !server.args || !server.command) {
+    return { server, changed: false };
+  }
+
+  const runAsNodeIndex = server.args.indexOf('--runAsNode');
+  if (runAsNodeIndex === -1 || runAsNodeIndex >= server.args.length - 1) {
+    return { server, changed: false };
+  }
+
+  const scriptArg = server.args[runAsNodeIndex + 1];
+  const match = scriptArg.match(CONNECTOR_SCRIPT_PATH_REGEX);
+  if (!match) {
+    return { server, changed: false };
+  }
+
+  const connectorName = match[1];
+  const expectedScriptPath = getConnectorScriptPathForCurrentRuntime(connectorName);
+  const expectedArgs = [...server.args];
+  expectedArgs[runAsNodeIndex + 1] = expectedScriptPath;
+  const expectedCommand = process.execPath;
+
+  if (server.command === expectedCommand && arraysEqual(server.args, expectedArgs)) {
+    return { server, changed: false };
+  }
+
+  return {
+    server: {
+      ...server,
+      command: expectedCommand,
+      args: expectedArgs,
+    },
+    changed: true,
+  };
+}
 
 /**
  * Encrypt a secret using OS keychain via safeStorage
@@ -234,7 +291,25 @@ export class MCPSettingsManager {
             ...stored,
             servers: stored.servers || [],
           };
-          this.cachedSettings = merged;
+          let normalizedChanged = false;
+          const normalizedServers = merged.servers.map((server) => {
+            const normalized = normalizeConnectorRuntime(server);
+            if (normalized.changed) {
+              normalizedChanged = true;
+            }
+            return normalized.server;
+          });
+
+          this.cachedSettings = {
+            ...merged,
+            servers: normalizedServers,
+          };
+
+          if (normalizedChanged) {
+            console.log('[MCP Settings] Normalized local connector runtime paths');
+            this.saveSettings(this.cachedSettings);
+          }
+
           console.log(`[MCP Settings] Loaded ${this.cachedSettings.servers.length} server(s) from encrypted database`);
           return this.cachedSettings;
         }
