@@ -80,11 +80,12 @@ const IPC_CHANNELS = {
   ONEDRIVE_SAVE_SETTINGS: 'onedrive:saveSettings',
   ONEDRIVE_TEST_CONNECTION: 'onedrive:testConnection',
   ONEDRIVE_GET_STATUS: 'onedrive:getStatus',
-  // Google Drive Settings
-  GOOGLE_DRIVE_GET_SETTINGS: 'googleDrive:getSettings',
-  GOOGLE_DRIVE_SAVE_SETTINGS: 'googleDrive:saveSettings',
-  GOOGLE_DRIVE_TEST_CONNECTION: 'googleDrive:testConnection',
-  GOOGLE_DRIVE_GET_STATUS: 'googleDrive:getStatus',
+  // Google Workspace Settings
+  GOOGLE_WORKSPACE_GET_SETTINGS: 'googleWorkspace:getSettings',
+  GOOGLE_WORKSPACE_SAVE_SETTINGS: 'googleWorkspace:saveSettings',
+  GOOGLE_WORKSPACE_TEST_CONNECTION: 'googleWorkspace:testConnection',
+  GOOGLE_WORKSPACE_GET_STATUS: 'googleWorkspace:getStatus',
+  GOOGLE_WORKSPACE_OAUTH_START: 'googleWorkspace:oauthStart',
   // Dropbox Settings
   DROPBOX_GET_SETTINGS: 'dropbox:getSettings',
   DROPBOX_SAVE_SETTINGS: 'dropbox:saveSettings',
@@ -1527,6 +1528,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on('gateway:message', subscription);
     return () => ipcRenderer.removeListener('gateway:message', subscription);
   },
+  onGatewayUsersUpdated: (callback: (data: { channelId: string; channelType: string }) => void) => {
+    const subscription = (_: any, data: { channelId: string; channelType: string }) => callback(data);
+    ipcRenderer.on('gateway:users-updated', subscription);
+    return () => ipcRenderer.removeListener('gateway:users-updated', subscription);
+  },
 
   // WhatsApp-specific APIs
   getWhatsAppInfo: () => ipcRenderer.invoke('whatsapp:get-info'),
@@ -1573,11 +1579,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
   testOneDriveConnection: () => ipcRenderer.invoke(IPC_CHANNELS.ONEDRIVE_TEST_CONNECTION),
   getOneDriveStatus: () => ipcRenderer.invoke(IPC_CHANNELS.ONEDRIVE_GET_STATUS),
 
-  // Google Drive Settings APIs
-  getGoogleDriveSettings: () => ipcRenderer.invoke(IPC_CHANNELS.GOOGLE_DRIVE_GET_SETTINGS),
-  saveGoogleDriveSettings: (settings: any) => ipcRenderer.invoke(IPC_CHANNELS.GOOGLE_DRIVE_SAVE_SETTINGS, settings),
-  testGoogleDriveConnection: () => ipcRenderer.invoke(IPC_CHANNELS.GOOGLE_DRIVE_TEST_CONNECTION),
-  getGoogleDriveStatus: () => ipcRenderer.invoke(IPC_CHANNELS.GOOGLE_DRIVE_GET_STATUS),
+  // Google Workspace Settings APIs
+  getGoogleWorkspaceSettings: () => ipcRenderer.invoke(IPC_CHANNELS.GOOGLE_WORKSPACE_GET_SETTINGS),
+  saveGoogleWorkspaceSettings: (settings: any) => ipcRenderer.invoke(IPC_CHANNELS.GOOGLE_WORKSPACE_SAVE_SETTINGS, settings),
+  testGoogleWorkspaceConnection: () => ipcRenderer.invoke(IPC_CHANNELS.GOOGLE_WORKSPACE_TEST_CONNECTION),
+  getGoogleWorkspaceStatus: () => ipcRenderer.invoke(IPC_CHANNELS.GOOGLE_WORKSPACE_GET_STATUS),
+  startGoogleWorkspaceOAuth: (payload: { clientId: string; clientSecret?: string; scopes?: string[] }) =>
+    ipcRenderer.invoke(IPC_CHANNELS.GOOGLE_WORKSPACE_OAUTH_START, payload),
 
   // Dropbox Settings APIs
   getDropboxSettings: () => ipcRenderer.invoke(IPC_CHANNELS.DROPBOX_GET_SETTINGS),
@@ -2311,6 +2319,7 @@ export interface ElectronAPI {
   revokeGatewayAccess: (channelId: string, userId: string) => Promise<void>;
   generateGatewayPairing: (channelId: string, userId: string, displayName?: string) => Promise<string>;
   onGatewayMessage: (callback: (data: any) => void) => () => void;
+  onGatewayUsersUpdated: (callback: (data: { channelId: string; channelType: string }) => void) => () => void;
   // WhatsApp-specific APIs
   getWhatsAppInfo: () => Promise<{ qrCode?: string; phoneNumber?: string; status?: string }>;
   whatsAppLogout: () => Promise<void>;
@@ -2382,15 +2391,27 @@ export interface ElectronAPI {
   saveOneDriveSettings: (settings: any) => Promise<{ success: boolean }>;
   testOneDriveConnection: () => Promise<{ success: boolean; error?: string; name?: string; userId?: string; driveId?: string }>;
   getOneDriveStatus: () => Promise<{ configured: boolean; connected: boolean; name?: string; error?: string }>;
-  // Google Drive Settings
-  getGoogleDriveSettings: () => Promise<{
+  // Google Workspace Settings
+  getGoogleWorkspaceSettings: () => Promise<{
     enabled: boolean;
+    clientId?: string;
+    clientSecret?: string;
     accessToken?: string;
+    refreshToken?: string;
+    tokenExpiresAt?: number;
+    scopes?: string[];
     timeoutMs?: number;
   }>;
-  saveGoogleDriveSettings: (settings: any) => Promise<{ success: boolean }>;
-  testGoogleDriveConnection: () => Promise<{ success: boolean; error?: string; name?: string; userId?: string; email?: string }>;
-  getGoogleDriveStatus: () => Promise<{ configured: boolean; connected: boolean; name?: string; error?: string }>;
+  saveGoogleWorkspaceSettings: (settings: any) => Promise<{ success: boolean }>;
+  testGoogleWorkspaceConnection: () => Promise<{ success: boolean; error?: string; name?: string; userId?: string; email?: string }>;
+  getGoogleWorkspaceStatus: () => Promise<{ configured: boolean; connected: boolean; name?: string; error?: string }>;
+  startGoogleWorkspaceOAuth: (payload: { clientId: string; clientSecret?: string; scopes?: string[] }) => Promise<{
+    accessToken: string;
+    refreshToken?: string;
+    expiresIn?: number;
+    tokenType?: string;
+    scopes?: string[];
+  }>;
   // Dropbox Settings
   getDropboxSettings: () => Promise<{
     enabled: boolean;

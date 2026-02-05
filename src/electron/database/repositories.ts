@@ -1070,10 +1070,46 @@ export class ChannelUserRepository {
       WHERE channel_id = ?
         AND allowed = 0
         AND channel_user_id LIKE 'pending_%'
-        AND pairing_expires_at IS NOT NULL
-        AND pairing_expires_at < ?
+        AND (
+          pairing_expires_at IS NULL
+          OR pairing_code IS NULL
+          OR pairing_expires_at < ?
+        )
     `);
     const result = stmt.run(channelId, now);
+    return result.changes;
+  }
+
+  /**
+   * Delete all pending pairing entries for a channel (valid or expired).
+   */
+  deletePendingByChannel(channelId: string): number {
+    const stmt = this.db.prepare(`
+      DELETE FROM channel_users
+      WHERE channel_id = ?
+        AND allowed = 0
+        AND channel_user_id LIKE 'pending_%'
+    `);
+    const result = stmt.run(channelId);
+    return result.changes;
+  }
+
+  /**
+   * Delete expired or empty pending pairing entries across all channels.
+   */
+  deleteExpiredPendingAll(): number {
+    const now = Date.now();
+    const stmt = this.db.prepare(`
+      DELETE FROM channel_users
+      WHERE allowed = 0
+        AND channel_user_id LIKE 'pending_%'
+        AND (
+          pairing_expires_at IS NULL
+          OR pairing_code IS NULL
+          OR pairing_expires_at < ?
+        )
+    `);
+    const result = stmt.run(now);
     return result.changes;
   }
 

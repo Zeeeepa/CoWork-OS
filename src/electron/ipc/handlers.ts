@@ -29,7 +29,7 @@ import { MentionRepository } from '../agents/MentionRepository';
 import { TaskLabelRepository } from '../database/TaskLabelRepository';
 import { WorkingStateRepository } from '../agents/WorkingStateRepository';
 import { ContextPolicyManager } from '../gateway/context-policy';
-import { IPC_CHANNELS, LLMSettingsData, AddChannelRequest, UpdateChannelRequest, SecurityMode, UpdateInfo, TEMP_WORKSPACE_ID, TEMP_WORKSPACE_NAME, Workspace, AgentRole, Task, BoardColumn, XSettingsData, NotionSettingsData, BoxSettingsData, OneDriveSettingsData, GoogleDriveSettingsData, DropboxSettingsData, SharePointSettingsData } from '../../shared/types';
+import { IPC_CHANNELS, LLMSettingsData, AddChannelRequest, UpdateChannelRequest, SecurityMode, UpdateInfo, TEMP_WORKSPACE_ID, TEMP_WORKSPACE_NAME, Workspace, AgentRole, Task, BoardColumn, XSettingsData, NotionSettingsData, BoxSettingsData, OneDriveSettingsData, GoogleWorkspaceSettingsData, DropboxSettingsData, SharePointSettingsData } from '../../shared/types';
 import { CUSTOM_PROVIDER_MAP, CUSTOM_PROVIDER_IDS } from '../../shared/llm-provider-catalog';
 import * as os from 'os';
 import { AgentDaemon } from '../agent/daemon';
@@ -65,7 +65,7 @@ import {
   NotionSettingsSchema,
   BoxSettingsSchema,
   OneDriveSettingsSchema,
-  GoogleDriveSettingsSchema,
+  GoogleWorkspaceSettingsSchema,
   DropboxSettingsSchema,
   SharePointSettingsSchema,
   AddChannelSchema,
@@ -85,15 +85,16 @@ import { NotionSettingsManager } from '../settings/notion-manager';
 import { testNotionConnection } from '../utils/notion-api';
 import { BoxSettingsManager } from '../settings/box-manager';
 import { OneDriveSettingsManager } from '../settings/onedrive-manager';
-import { GoogleDriveSettingsManager } from '../settings/google-drive-manager';
+import { GoogleWorkspaceSettingsManager } from '../settings/google-workspace-manager';
 import { DropboxSettingsManager } from '../settings/dropbox-manager';
 import { SharePointSettingsManager } from '../settings/sharepoint-manager';
 import { testBoxConnection } from '../utils/box-api';
 import { testOneDriveConnection } from '../utils/onedrive-api';
-import { testGoogleDriveConnection } from '../utils/google-drive-api';
+import { testGoogleWorkspaceConnection } from '../utils/google-workspace-api';
 import { testDropboxConnection } from '../utils/dropbox-api';
 import { testSharePointConnection } from '../utils/sharepoint-api';
 import { startConnectorOAuth } from '../mcp/oauth/connector-oauth';
+import { startGoogleWorkspaceOAuth } from '../utils/google-workspace-oauth';
 
 const normalizeMentionToken = (value: string): string =>
   value.toLowerCase().replace(/[^a-z0-9]/g, '');
@@ -1895,41 +1896,46 @@ export async function setupIpcHandlers(
     };
   });
 
-  // Google Drive Settings handlers
-  ipcMain.handle(IPC_CHANNELS.GOOGLE_DRIVE_GET_SETTINGS, async () => {
-    return GoogleDriveSettingsManager.loadSettings();
+  // Google Workspace Settings handlers
+  ipcMain.handle(IPC_CHANNELS.GOOGLE_WORKSPACE_GET_SETTINGS, async () => {
+    return GoogleWorkspaceSettingsManager.loadSettings();
   });
 
-  ipcMain.handle(IPC_CHANNELS.GOOGLE_DRIVE_SAVE_SETTINGS, async (_, settings) => {
-    checkRateLimit(IPC_CHANNELS.GOOGLE_DRIVE_SAVE_SETTINGS);
-    const validated = validateInput(GoogleDriveSettingsSchema, settings, 'google drive settings') as GoogleDriveSettingsData;
-    GoogleDriveSettingsManager.saveSettings(validated);
-    GoogleDriveSettingsManager.clearCache();
+  ipcMain.handle(IPC_CHANNELS.GOOGLE_WORKSPACE_SAVE_SETTINGS, async (_, settings) => {
+    checkRateLimit(IPC_CHANNELS.GOOGLE_WORKSPACE_SAVE_SETTINGS);
+    const validated = validateInput(GoogleWorkspaceSettingsSchema, settings, 'google workspace settings') as GoogleWorkspaceSettingsData;
+    GoogleWorkspaceSettingsManager.saveSettings(validated);
+    GoogleWorkspaceSettingsManager.clearCache();
     return { success: true };
   });
 
-  ipcMain.handle(IPC_CHANNELS.GOOGLE_DRIVE_TEST_CONNECTION, async () => {
-    checkRateLimit(IPC_CHANNELS.GOOGLE_DRIVE_TEST_CONNECTION);
-    const settings = GoogleDriveSettingsManager.loadSettings();
-    return testGoogleDriveConnection(settings);
+  ipcMain.handle(IPC_CHANNELS.GOOGLE_WORKSPACE_TEST_CONNECTION, async () => {
+    checkRateLimit(IPC_CHANNELS.GOOGLE_WORKSPACE_TEST_CONNECTION);
+    const settings = GoogleWorkspaceSettingsManager.loadSettings();
+    return testGoogleWorkspaceConnection(settings);
   });
 
-  ipcMain.handle(IPC_CHANNELS.GOOGLE_DRIVE_GET_STATUS, async () => {
-    checkRateLimit(IPC_CHANNELS.GOOGLE_DRIVE_GET_STATUS);
-    const settings = GoogleDriveSettingsManager.loadSettings();
-    if (!settings.accessToken) {
+  ipcMain.handle(IPC_CHANNELS.GOOGLE_WORKSPACE_GET_STATUS, async () => {
+    checkRateLimit(IPC_CHANNELS.GOOGLE_WORKSPACE_GET_STATUS);
+    const settings = GoogleWorkspaceSettingsManager.loadSettings();
+    if (!settings.accessToken && !settings.refreshToken) {
       return { configured: false, connected: false };
     }
     if (!settings.enabled) {
       return { configured: true, connected: false };
     }
-    const result = await testGoogleDriveConnection(settings);
+    const result = await testGoogleWorkspaceConnection(settings);
     return {
       configured: true,
       connected: result.success,
       name: result.name,
       error: result.success ? undefined : result.error,
     };
+  });
+
+  ipcMain.handle(IPC_CHANNELS.GOOGLE_WORKSPACE_OAUTH_START, async (_, payload) => {
+    checkRateLimit(IPC_CHANNELS.GOOGLE_WORKSPACE_OAUTH_START);
+    return startGoogleWorkspaceOAuth(payload);
   });
 
   // Dropbox Settings handlers
