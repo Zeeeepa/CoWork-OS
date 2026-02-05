@@ -62,6 +62,47 @@ _Sources: [OpenClaw README](https://github.com/openclaw/openclaw), [OpenClaw doc
 
 ---
 
+## Installation
+
+### macOS App (Recommended)
+
+- Download DMG (Apple Silicon): [CoWork OS 0.3.27](https://github.com/CoWork-OS/CoWork-OS/releases/download/v0.3.27/CoWork-OS-0.3.27-arm64.dmg)
+- Latest releases: [GitHub Releases](https://github.com/CoWork-OS/CoWork-OS/releases/latest)
+- Open the `.dmg` and drag **CoWork OS** into **Applications**
+
+### From Source (Development)
+
+#### Prerequisites
+
+- Node.js 18+ and npm
+- macOS 12 (Monterey) or later
+- One of: any supported LLM provider credentials (API key/token or AWS credentials) or Ollama installed locally
+
+```bash
+# Clone the repository
+git clone https://github.com/CoWork-OS/CoWork-OS.git
+cd CoWork-OS
+
+# Install dependencies
+npm install
+
+# Run in development mode
+npm run dev
+
+# Configure your API credentials in Settings (gear icon)
+```
+
+#### Build for Production
+
+```bash
+npm run build
+npm run package
+```
+
+The packaged app will be in the `release/` directory.
+
+---
+
 ### Security Verified by ZeroLeaks
 
 <p align="center">
@@ -460,41 +501,6 @@ This is a good option for:
 - Testing before installing on your main machine
 - Isolating AI agent file operations from your primary system
 - Running experimental tasks in a sandboxed environment
-
----
-
-## Setup
-
-### Prerequisites
-
-- Node.js 18+ and npm
-- macOS 12 (Monterey) or later
-- One of: any supported LLM provider credentials (API key/token or AWS credentials) or Ollama installed locally
-
-### Installation
-
-```bash
-# Clone the repository
-git clone https://github.com/CoWork-OS/CoWork-OS.git
-cd CoWork-OS
-
-# Install dependencies
-npm install
-
-# Run in development mode
-npm run dev
-
-# Configure your API credentials in Settings (gear icon)
-```
-
-### Building for Production
-
-```bash
-npm run build
-npm run package
-```
-
-The packaged app will be in the `release/` directory.
 
 ---
 
