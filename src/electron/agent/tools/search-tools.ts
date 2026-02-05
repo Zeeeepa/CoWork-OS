@@ -94,18 +94,36 @@ export class SearchTools {
     });
 
     // Use searchWithFallback for automatic fallback support
-    const response = await SearchProviderFactory.searchWithFallback(searchQuery);
+    try {
+      const response = await SearchProviderFactory.searchWithFallback(searchQuery);
 
-    this.daemon.logEvent(this.taskId, 'tool_result', {
-      tool: 'web_search',
-      result: {
+      this.daemon.logEvent(this.taskId, 'tool_result', {
+        tool: 'web_search',
+        result: {
+          query: input.query,
+          searchType: searchQuery.searchType,
+          resultCount: response.results.length,
+          provider: response.provider,
+        },
+      });
+
+      return response;
+    } catch (error: any) {
+      const message = error?.message || 'Web search failed';
+      this.daemon.logEvent(this.taskId, 'tool_result', {
+        tool: 'web_search',
+        error: message,
+      });
+
+      return {
         query: input.query,
-        searchType: searchQuery.searchType,
-        resultCount: response.results.length,
-        provider: response.provider,
-      },
-    });
-
-    return response;
+        searchType: input.searchType || 'web',
+        results: [],
+        provider: (input.provider || settings.primaryProvider || 'none') as SearchProviderType | 'none',
+        metadata: {
+          error: message,
+        },
+      };
+    }
   }
 }

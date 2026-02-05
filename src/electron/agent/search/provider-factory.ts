@@ -48,6 +48,47 @@ const DEFAULT_SETTINGS: SearchSettings = {
  * Factory for creating Search providers with fallback support
  */
 export class SearchProviderFactory {
+  private static async sleep(ms: number): Promise<void> {
+    return new Promise(resolve => setTimeout(resolve, ms));
+  }
+
+  private static isTransientSearchError(error: any): boolean {
+    const message = String(error?.message || '');
+    return (
+      /rate limit/i.test(message) ||
+      /429/.test(message) ||
+      /too many requests/i.test(message) ||
+      /timeout/i.test(message) ||
+      /ETIMEDOUT/i.test(message) ||
+      /ECONNRESET/i.test(message) ||
+      /EAI_AGAIN/i.test(message) ||
+      /503/.test(message) ||
+      /502/.test(message) ||
+      /504/.test(message) ||
+      /service unavailable/i.test(message)
+    );
+  }
+
+  private static async searchWithRetry(provider: SearchProvider, query: SearchQuery, maxAttempts = 3): Promise<SearchResponse> {
+    let lastError: any;
+
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      try {
+        return await provider.search(query);
+      } catch (error: any) {
+        lastError = error;
+        if (!this.isTransientSearchError(error) || attempt === maxAttempts) {
+          throw error;
+        }
+        // Exponential backoff with jitter: ~1s, ~2s, ~4s
+        const baseDelay = 1000 * Math.pow(2, attempt - 1);
+        const jitter = Math.random() * 500;
+        await this.sleep(baseDelay + jitter);
+      }
+    }
+
+    throw lastError || new Error('Search failed');
+  }
   private static legacySettingsPath: string;
   private static cachedSettings: SearchSettings | null = null;
   private static migrationCompleted = false;
@@ -321,7 +362,7 @@ export class SearchProviderFactory {
     try {
       const primaryConfig = this.getProviderConfig(primaryType);
       const primaryProvider = this.createProviderFromConfig(primaryConfig);
-      return await primaryProvider.search(query);
+      return await this.searchWithRetry(primaryProvider, query);
     } catch (primaryError: any) {
       console.error(`Primary search provider (${primaryType}) failed:`, primaryError.message);
 
@@ -337,7 +378,7 @@ export class SearchProviderFactory {
         try {
           const fallbackConfig = this.getProviderConfig(fallbackType);
           const fallbackProvider = this.createProviderFromConfig(fallbackConfig);
-          const response = await fallbackProvider.search(query);
+          const response = await this.searchWithRetry(fallbackProvider, query);
           // Indicate this came from fallback
           console.log(`Fallback search with ${fallbackType} succeeded`);
           return response;
