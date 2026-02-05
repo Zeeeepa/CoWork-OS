@@ -65,6 +65,12 @@ export class StdioTransport extends EventEmitter implements MCPTransport {
           ...env,
         };
 
+        // When launching via Electron's executable with --runAsNode, force pure
+        // Node mode so macOS doesn't treat child connector processes as GUI apps.
+        if (command === process.execPath && args.includes('--runAsNode')) {
+          processEnv.ELECTRON_RUN_AS_NODE = '1';
+        }
+
         console.log(`[MCP StdioTransport] Spawning: ${command} ${args.join(' ')}`);
 
         this.process = spawn(command, args, {

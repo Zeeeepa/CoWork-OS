@@ -69,9 +69,11 @@ _Sources: [OpenClaw README](https://github.com/openclaw/openclaw), [OpenClaw doc
 - Download DMG (Apple Silicon): [CoWork OS 0.3.28](https://github.com/CoWork-OS/CoWork-OS/releases/download/v0.3.28/CoWork-OS-0.3.28-arm64.dmg)
 - Latest releases: [GitHub Releases](https://github.com/CoWork-OS/CoWork-OS/releases/latest)
 - Open the `.dmg` and drag **CoWork OS** into **Applications**
+- Eject the mounted DMG after copying, then launch only **/Applications/CoWork OS.app** (prevents duplicate app instances/icons)
 - This app is currently distributed as an unsigned build. On first launch, use **System Settings > Privacy & Security > Open Anyway** once.
 - Terminal fallback: `xattr -dr com.apple.quarantine "/Applications/CoWork OS.app"`
 - If the app closes immediately with a `dyld` signature error, run: `codesign --force --deep --sign - "/Applications/CoWork OS.app"`
+- `spctl --add` / `spctl --enable` are deprecated on newer macOS and may show "This operation is no longer supported"
 
 ### From Source (Development)
 
