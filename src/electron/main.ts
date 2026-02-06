@@ -23,6 +23,7 @@ import { updateManager } from './updater';
 import { migrateEnvToSettings } from './utils/env-migration';
 import { GuardrailManager } from './guardrails/guardrail-manager';
 import { AppearanceManager } from './settings/appearance-manager';
+import { MemoryFeaturesManager } from './settings/memory-features-manager';
 import { PersonalityManager } from './settings/personality-manager';
 import { MCPClientManager } from './mcp/client/MCPClientManager';
 import { trayManager } from './tray';
@@ -141,6 +142,7 @@ app.whenReady().then(async () => {
   GuardrailManager.initialize();
   AppearanceManager.initialize();
   PersonalityManager.initialize();
+  MemoryFeaturesManager.initialize();
 
   // Migrate .env configuration to Settings (one-time upgrade path)
   const migrationResult = await migrateEnvToSettings();

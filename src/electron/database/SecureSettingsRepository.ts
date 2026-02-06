@@ -35,6 +35,7 @@ export interface LoadResult<T> {
 /** Settings categories supported */
 export type SettingsCategory =
   | 'voice'
+  | 'memory'
   | 'llm'
   | 'search'
   | 'appearance'

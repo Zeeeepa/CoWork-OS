@@ -72,6 +72,7 @@ import {
 } from '../utils/validation';
 import { GuardrailManager } from '../guardrails/guardrail-manager';
 import { AppearanceManager } from '../settings/appearance-manager';
+import { MemoryFeaturesManager } from '../settings/memory-features-manager';
 import { PersonalityManager } from '../settings/personality-manager';
 import { NotionSettingsManager } from '../settings/notion-manager';
 import { testNotionConnection } from '../utils/notion-api';
@@ -3428,6 +3429,31 @@ function setupMemoryHandlers(): void {
       }
     }
   );
+
+  // Get global memory feature toggles
+  ipcMain.handle(IPC_CHANNELS.MEMORY_FEATURES_GET_SETTINGS, async () => {
+    try {
+      return MemoryFeaturesManager.loadSettings();
+    } catch (error) {
+      console.error('[MemoryFeatures] Failed to get settings:', error);
+      return {
+        contextPackInjectionEnabled: true,
+        heartbeatMaintenanceEnabled: true,
+      };
+    }
+  });
+
+  // Save global memory feature toggles
+  ipcMain.handle(IPC_CHANNELS.MEMORY_FEATURES_SAVE_SETTINGS, async (_event, settings: any) => {
+    checkRateLimit(IPC_CHANNELS.MEMORY_FEATURES_SAVE_SETTINGS, RATE_LIMIT_CONFIGS.limited);
+    try {
+      MemoryFeaturesManager.saveSettings(settings);
+      return { success: true };
+    } catch (error) {
+      console.error('[MemoryFeatures] Failed to save settings:', error);
+      throw error;
+    }
+  });
 
   // Search memories
   ipcMain.handle(

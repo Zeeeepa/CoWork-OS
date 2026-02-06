@@ -1963,14 +1963,33 @@ export interface MemorySettings {
   excludedPatterns?: string[];
 }
 
-export interface MemorySearchResult {
-  id: string;
-  snippet: string;
-  type: MemoryType;
-  relevanceScore: number;
-  createdAt: number;
-  taskId?: string;
-}
+export type MemorySearchResult =
+  | {
+      id: string;
+      snippet: string;
+      type: MemoryType;
+      relevanceScore: number;
+      createdAt: number;
+      taskId?: string;
+      /** Origin of this search result (database memory vs markdown kit index). */
+      source: 'db';
+    }
+  | {
+      id: string;
+      snippet: string;
+      type: MemoryType;
+      relevanceScore: number;
+      createdAt: number;
+      taskId?: string;
+      /** Origin of this search result (database memory vs markdown kit index). */
+      source: 'markdown';
+      /** File path for markdown-backed results (workspace-relative). */
+      path: string;
+      /** Start line (1-based) for markdown-backed results. */
+      startLine: number;
+      /** End line (1-based) for markdown-backed results. */
+      endLine: number;
+    };
 
 export interface MemoryTimelineEntry {
   id: string;
@@ -2087,6 +2106,7 @@ export class MemoryRepository {
         relevanceScore: Math.abs(row.score as number),
         createdAt: row.created_at as number,
         taskId: (row.task_id as string) || undefined,
+        source: 'db' as const,
       }));
     } catch {
       // Fall back to LIKE search if FTS5 is not available
@@ -2108,6 +2128,7 @@ export class MemoryRepository {
         relevanceScore: 1,
         createdAt: row.created_at as number,
         taskId: (row.task_id as string) || undefined,
+        source: 'db' as const,
       }));
     }
   }
