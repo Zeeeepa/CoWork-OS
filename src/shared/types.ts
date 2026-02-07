@@ -201,6 +201,7 @@ export const TOOL_GROUPS = {
   // Write operations - medium risk
   'group:write': [
     'write_file',
+    'edit_file',
     'copy_file',
     'rename_file',
     'create_directory',
@@ -871,6 +872,8 @@ export const DEFAULT_AGENT_ROLES: Omit<AgentRole, 'id' | 'createdAt' | 'updatedA
     icon: '🔍',
     color: '#8b5cf6',
     capabilities: ['review', 'analyze'],
+    // Default to read-only behavior; reviewers should not modify files or run commands unless explicitly intended.
+    toolRestrictions: { deniedTools: ['group:write', 'group:destructive'] },
     autonomyLevel: 'specialist',
     isSystem: true,
     isActive: true,
@@ -883,6 +886,8 @@ export const DEFAULT_AGENT_ROLES: Omit<AgentRole, 'id' | 'createdAt' | 'updatedA
     icon: '🔬',
     color: '#10b981',
     capabilities: ['research', 'analyze', 'document'],
+    // Default to read-only behavior; research tasks should not modify files or run commands.
+    toolRestrictions: { deniedTools: ['group:write', 'group:destructive'] },
     autonomyLevel: 'specialist',
     isSystem: true,
     isActive: true,

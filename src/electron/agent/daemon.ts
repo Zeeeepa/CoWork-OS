@@ -85,6 +85,42 @@ export class AgentDaemon extends EventEmitter {
   }
 
   /**
+   * Merge agent role tool restrictions into the task's agentConfig.
+   *
+   * Note: Tasks support an additive deny-list via AgentConfig.toolRestrictions. Agent roles store
+   * restrictions as { deniedTools, allowedTools }. For now we enforce deniedTools (deny-wins),
+   * merging them into the task's existing toolRestrictions (if any).
+   */
+  private applyAgentRoleToolRestrictions(task: Task): Task {
+    const roleId = task.assignedAgentRoleId;
+    if (!roleId) return task;
+
+    const role = this.agentRoleRepo.findById(roleId);
+    const denied = role?.toolRestrictions?.deniedTools;
+    if (!Array.isArray(denied) || denied.length === 0) return task;
+
+    const merged = new Set<string>();
+
+    const addAll = (values: unknown) => {
+      if (!Array.isArray(values)) return;
+      for (const raw of values) {
+        const value = typeof raw === 'string' ? raw.trim() : '';
+        if (!value) continue;
+        merged.add(value);
+      }
+    };
+
+    addAll(task.agentConfig?.toolRestrictions);
+    addAll(denied);
+
+    if (merged.size === 0) return task;
+
+    const nextAgentConfig: AgentConfig = task.agentConfig ? { ...task.agentConfig } : {};
+    nextAgentConfig.toolRestrictions = Array.from(merged);
+    return { ...task, agentConfig: nextAgentConfig };
+  }
+
+  /**
    * Initialize the daemon - call after construction to set up queue
    */
   async initialize(): Promise<void> {
@@ -185,19 +221,20 @@ export class AgentDaemon extends EventEmitter {
    */
   async startTaskImmediate(task: Task): Promise<void> {
     console.log(`[AgentDaemon] Starting task ${task.id}: ${task.title}`);
+    const effectiveTask = this.applyAgentRoleToolRestrictions(task);
 
-    const wasQueued = task.status === 'queued';
+    const wasQueued = effectiveTask.status === 'queued';
     if (wasQueued) {
-      const isRetry = this.retryCounts.has(task.id);
-      const count = this.retryCounts.get(task.id) ?? 0;
+      const isRetry = this.retryCounts.has(effectiveTask.id);
+      const count = this.retryCounts.get(effectiveTask.id) ?? 0;
       const retrySuffix = isRetry ? ` (retry ${count}/${this.maxTaskRetries})` : '';
-      this.logEvent(task.id, 'task_dequeued', { message: `▶️ Starting now${retrySuffix}.` });
+      this.logEvent(effectiveTask.id, 'task_dequeued', { message: `▶️ Starting now${retrySuffix}.` });
     }
 
     // Get workspace details
-    const workspace = this.workspaceRepo.findById(task.workspaceId);
+    const workspace = this.workspaceRepo.findById(effectiveTask.workspaceId);
     if (!workspace) {
-      throw new Error(`Workspace ${task.workspaceId} not found`);
+      throw new Error(`Workspace ${effectiveTask.workspaceId} not found`);
     }
     console.log(`[AgentDaemon] Workspace found: ${workspace.name}`);
 
@@ -205,46 +242,46 @@ export class AgentDaemon extends EventEmitter {
     let executor: TaskExecutor;
     try {
       console.log(`[AgentDaemon] Creating TaskExecutor...`);
-      executor = new TaskExecutor(task, workspace, this);
+      executor = new TaskExecutor(effectiveTask, workspace, this);
       console.log(`[AgentDaemon] TaskExecutor created successfully`);
     } catch (error: any) {
-      console.error(`[AgentDaemon] Task ${task.id} failed to initialize:`, error);
-      this.taskRepo.update(task.id, {
+      console.error(`[AgentDaemon] Task ${effectiveTask.id} failed to initialize:`, error);
+      this.taskRepo.update(effectiveTask.id, {
         status: 'failed',
         error: error.message || 'Failed to initialize task executor',
         completedAt: Date.now(),
       });
-      this.clearRetryState(task.id);
-      this.logEvent(task.id, 'error', { error: error.message });
+      this.clearRetryState(effectiveTask.id);
+      this.logEvent(effectiveTask.id, 'error', { error: error.message });
       // Notify queue manager so it can start next task
-      this.queueManager.onTaskFinished(task.id);
+      this.queueManager.onTaskFinished(effectiveTask.id);
       return;
     }
 
-    this.activeTasks.set(task.id, {
+    this.activeTasks.set(effectiveTask.id, {
       executor,
       lastAccessed: Date.now(),
       status: 'active',
     });
 
     // Update task status
-    this.taskRepo.update(task.id, { status: 'planning', error: undefined });
-    this.logEvent(task.id, 'task_created', { task });
+    this.taskRepo.update(effectiveTask.id, { status: 'planning', error: undefined });
+    this.logEvent(effectiveTask.id, 'task_created', { task: effectiveTask });
     console.log(`[AgentDaemon] Task status updated to 'planning', starting execution...`);
 
     // Start execution (non-blocking)
     executor.execute().catch(error => {
-      console.error(`[AgentDaemon] Task ${task.id} execution failed:`, error);
-      this.taskRepo.update(task.id, {
+      console.error(`[AgentDaemon] Task ${effectiveTask.id} execution failed:`, error);
+      this.taskRepo.update(effectiveTask.id, {
         status: 'failed',
         error: error.message,
         completedAt: Date.now(),
       });
-      this.clearRetryState(task.id);
-      this.logEvent(task.id, 'error', { error: error.message });
-      this.activeTasks.delete(task.id);
+      this.clearRetryState(effectiveTask.id);
+      this.logEvent(effectiveTask.id, 'error', { error: error.message });
+      this.activeTasks.delete(effectiveTask.id);
       // Notify queue manager so it can start next task
-      this.queueManager.onTaskFinished(task.id);
+      this.queueManager.onTaskFinished(effectiveTask.id);
     });
   }
 
@@ -456,6 +493,9 @@ export class AgentDaemon extends EventEmitter {
         agentConfig: {
           ...(role.modelKey ? { modelKey: role.modelKey } : {}),
           ...(role.personalityId ? { personalityId: role.personalityId } : {}),
+          ...(Array.isArray(role.toolRestrictions?.deniedTools) && role.toolRestrictions!.deniedTools.length > 0
+            ? { toolRestrictions: role.toolRestrictions!.deniedTools }
+            : {}),
           retainMemory: false,
         },
       });
@@ -1203,16 +1243,17 @@ export class AgentDaemon extends EventEmitter {
     if (!task) {
       throw new Error(`Task ${taskId} not found`);
     }
+    const effectiveTask = this.applyAgentRoleToolRestrictions(task);
 
-    const workspace = this.workspaceRepo.findById(task.workspaceId);
+    const workspace = this.workspaceRepo.findById(effectiveTask.workspaceId);
     if (!workspace) {
-      throw new Error(`Workspace ${task.workspaceId} not found`);
+      throw new Error(`Workspace ${effectiveTask.workspaceId} not found`);
     }
 
     if (!cached) {
       // Task executor not in memory - need to recreate it
       // Create new executor
-      executor = new TaskExecutor(task, workspace, this);
+      executor = new TaskExecutor(effectiveTask, workspace, this);
 
       // Rebuild conversation history from saved events
       const events = this.eventRepo.findByTaskId(taskId);
