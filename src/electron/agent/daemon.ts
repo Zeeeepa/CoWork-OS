@@ -1169,6 +1169,163 @@ export class AgentDaemon extends EventEmitter {
   }
 
   /**
+   * Query recent task history across the local database.
+   * Intended for answering questions like "what did we talk about yesterday?".
+   *
+   * Note: This is intentionally read-only and returns truncated text to avoid huge payloads.
+   */
+  queryTaskHistory(params: {
+    period: 'today' | 'yesterday' | 'last_7_days' | 'last_30_days' | 'custom';
+    from?: string | number;
+    to?: string | number;
+    limit?: number;
+    workspaceId?: string;
+    query?: string;
+    includeMessages?: boolean;
+  }): { success: true; period: string; range: { startMs: number; endMs: number; startIso: string; endIso: string }; tasks: any[] } | { success: false; error: string } {
+    try {
+      const period = params?.period;
+      if (!period) {
+        return { success: false, error: 'Missing required field: period' };
+      }
+
+      const clampLimit = (value: unknown): number => {
+        const n = typeof value === 'number' && Number.isFinite(value) ? Math.floor(value) : 20;
+        return Math.min(Math.max(n, 1), 50);
+      };
+
+      const truncate = (value: unknown, maxChars: number): string => {
+        const s = typeof value === 'string' ? value : '';
+        if (!s) return '';
+        if (s.length <= maxChars) return s;
+        return s.slice(0, maxChars) + '…';
+      };
+
+      const now = new Date();
+      const startOfDayMs = (d: Date): number => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+
+      const parseTime = (v: unknown): number | null => {
+        if (typeof v === 'number' && Number.isFinite(v)) return v;
+        if (typeof v !== 'string') return null;
+        const raw = v.trim();
+        if (!raw) return null;
+        const dt = new Date(raw);
+        const ms = dt.getTime();
+        return Number.isFinite(ms) ? ms : null;
+      };
+
+      const nowMs = now.getTime();
+      const todayStart = startOfDayMs(now);
+
+      let startMs: number;
+      let endMs: number;
+
+      switch (period) {
+        case 'today': {
+          startMs = todayStart;
+          endMs = todayStart + 24 * 60 * 60 * 1000;
+          break;
+        }
+        case 'yesterday': {
+          endMs = todayStart;
+          startMs = endMs - 24 * 60 * 60 * 1000;
+          break;
+        }
+        case 'last_7_days': {
+          startMs = nowMs - 7 * 24 * 60 * 60 * 1000;
+          endMs = nowMs;
+          break;
+        }
+        case 'last_30_days': {
+          startMs = nowMs - 30 * 24 * 60 * 60 * 1000;
+          endMs = nowMs;
+          break;
+        }
+        case 'custom': {
+          const fromMs = parseTime(params?.from);
+          const toMs = parseTime(params?.to);
+          if (fromMs != null && toMs != null) {
+            startMs = fromMs;
+            endMs = toMs;
+          } else if (fromMs != null) {
+            startMs = fromMs;
+            endMs = nowMs;
+          } else if (toMs != null) {
+            endMs = toMs;
+            startMs = endMs - 24 * 60 * 60 * 1000;
+          } else {
+            startMs = nowMs - 7 * 24 * 60 * 60 * 1000;
+            endMs = nowMs;
+          }
+          break;
+        }
+        default: {
+          return { success: false, error: `Unsupported period: ${String(period)}` };
+        }
+      }
+
+      // Guard against inverted ranges.
+      if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs <= startMs) {
+        return { success: false, error: 'Invalid time range' };
+      }
+
+      const limit = clampLimit(params?.limit);
+      const workspaceId = typeof params?.workspaceId === 'string' ? params.workspaceId.trim() : undefined;
+      const query = typeof params?.query === 'string' ? params.query.trim() : undefined;
+      const includeMessages = params?.includeMessages !== false;
+
+      const tasks = this.taskRepo.findByCreatedAtRange({
+        startMs,
+        endMs,
+        limit,
+        workspaceId,
+        query,
+      });
+
+      const taskIds = tasks.map((t) => t.id);
+      const messageEvents = includeMessages && taskIds.length > 0
+        ? this.eventRepo.findByTaskIds(taskIds, ['assistant_message', 'user_message'])
+        : [];
+
+      const lastAssistant = new Map<string, string>();
+      const lastUser = new Map<string, string>();
+      for (const evt of messageEvents) {
+        const msg = (evt.payload as any)?.message ?? (evt.payload as any)?.content;
+        const text = typeof msg === 'string' ? msg : '';
+        if (!text) continue;
+        if (evt.type === 'assistant_message') lastAssistant.set(evt.taskId, truncate(text, 900));
+        if (evt.type === 'user_message') lastUser.set(evt.taskId, truncate(text, 900));
+      }
+
+      const items = tasks.map((t) => ({
+        id: t.id,
+        title: t.title,
+        status: t.status,
+        workspaceId: t.workspaceId,
+        createdAtMs: t.createdAt,
+        createdAtIso: new Date(t.createdAt).toISOString(),
+        prompt: truncate(t.prompt, 700),
+        lastUserMessage: includeMessages ? lastUser.get(t.id) : undefined,
+        lastAssistantMessage: includeMessages ? lastAssistant.get(t.id) : undefined,
+      }));
+
+      return {
+        success: true,
+        period,
+        range: {
+          startMs,
+          endMs,
+          startIso: new Date(startMs).toISOString(),
+          endIso: new Date(endMs).toISOString(),
+        },
+        tasks: items,
+      };
+    } catch (error: any) {
+      return { success: false, error: error?.message ? String(error.message) : String(error) };
+    }
+  }
+
+  /**
    * Update task workspace ID in database
    */
   updateTaskWorkspace(taskId: string, workspaceId: string): void {

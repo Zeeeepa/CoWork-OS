@@ -267,6 +267,56 @@ export class TaskRepository {
     return rows.map(row => this.mapRowToTask(row));
   }
 
+  /**
+   * Find tasks within a created_at time range (inclusive start, exclusive end).
+   * Optionally filter by workspace and a simple substring query over title/prompt.
+   */
+  findByCreatedAtRange(params: {
+    startMs: number;
+    endMs: number;
+    limit?: number;
+    workspaceId?: string;
+    query?: string;
+  }): Task[] {
+    const startMs = Number(params.startMs);
+    const endMs = Number(params.endMs);
+    if (!Number.isFinite(startMs) || !Number.isFinite(endMs)) return [];
+    if (endMs <= startMs) return [];
+
+    const limit =
+      typeof params.limit === 'number' && Number.isFinite(params.limit)
+        ? Math.min(Math.max(Math.floor(params.limit), 1), 200)
+        : 50;
+
+    const where: string[] = ['created_at >= ?', 'created_at < ?'];
+    const args: any[] = [startMs, endMs];
+
+    const workspaceId = typeof params.workspaceId === 'string' ? params.workspaceId.trim() : '';
+    if (workspaceId) {
+      where.push('workspace_id = ?');
+      args.push(workspaceId);
+    }
+
+    const query = typeof params.query === 'string' ? params.query.trim() : '';
+    if (query) {
+      // Simple LIKE match (SQLite default collation is case-insensitive for ASCII).
+      where.push('(title LIKE ? OR prompt LIKE ?)');
+      args.push(`%${query}%`, `%${query}%`);
+    }
+
+    args.push(limit);
+
+    const stmt = this.db.prepare(`
+      SELECT * FROM tasks
+      WHERE ${where.join(' AND ')}
+      ORDER BY created_at DESC
+      LIMIT ?
+    `);
+
+    const rows = stmt.all(...args) as any[];
+    return rows.map(row => this.mapRowToTask(row));
+  }
+
   delete(id: string): void {
     // Use transaction to ensure atomic deletion
     const deleteTransaction = this.db.transaction((taskId: string) => {

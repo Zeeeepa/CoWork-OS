@@ -12,6 +12,7 @@ const execAsync = promisify(exec);
 const execFileAsync = promisify(execFile);
 
 const DEFAULT_TIMEOUT = 30 * 1000; // 30 seconds
+const APPLESCRIPT_TIMEOUT_MS = 120 * 1000; // 2 minutes
 
 /**
  * SystemTools provides system-level capabilities beyond the workspace
@@ -449,7 +450,7 @@ export class SystemTools {
       const args = lines.flatMap(line => ['-e', line]);
 
       const { stdout, stderr } = await execFileAsync('osascript', args, {
-        timeout: DEFAULT_TIMEOUT,
+        timeout: APPLESCRIPT_TIMEOUT_MS,
         maxBuffer: 1024 * 1024, // 1MB buffer
       });
 

@@ -1357,6 +1357,15 @@ export class TaskExecutor {
   private getToolTimeoutMs(toolName: string, input: unknown): number {
     const settingsTimeout = BuiltinToolsSettingsManager.getToolTimeoutMs(toolName);
     const normalizedSettingsTimeout = settingsTimeout && settingsTimeout > 0 ? settingsTimeout : null;
+    const toolInput = input && typeof input === 'object' ? (input as any) : {};
+
+    const clampToStepTimeout = (ms: number): number => {
+      // Tool calls happen inside a step; keep a small buffer so the step timeout
+      // doesn't race the tool timeout at the exact same moment.
+      const maxMs = Math.max(STEP_TIMEOUT_MS - 5_000, 5_000);
+      if (!Number.isFinite(ms) || ms <= 0) return TOOL_TIMEOUT_MS;
+      return Math.min(Math.round(ms), maxMs);
+    };
 
     if (toolName === 'run_command') {
       const inputTimeout = typeof (input as { timeout?: unknown })?.timeout === 'number'
@@ -1366,6 +1375,39 @@ export class TaskExecutor {
         return Math.round(inputTimeout);
       }
       return normalizedSettingsTimeout ?? TOOL_TIMEOUT_MS;
+    }
+
+    // Child-agent coordination tools can legitimately run longer than the default timeout.
+    if (toolName === 'wait_for_agent') {
+      const inputSeconds = toolInput?.timeout_seconds;
+      const seconds = typeof inputSeconds === 'number' && Number.isFinite(inputSeconds) && inputSeconds > 0
+        ? inputSeconds
+        : 300;
+      // Prefer explicit input (so callers can choose shorter/longer waits),
+      // otherwise fall back to settings/default.
+      if (typeof inputSeconds === 'number') {
+        return clampToStepTimeout(seconds * 1000 + 2_000);
+      }
+      return normalizedSettingsTimeout ?? clampToStepTimeout(seconds * 1000 + 2_000);
+    }
+
+    if (toolName === 'spawn_agent') {
+      // When wait=true, the tool blocks until the child agent completes (or times out).
+      // Default internal wait is 300s; give it enough headroom.
+      const wait = toolInput?.wait === true;
+      if (wait) {
+        return normalizedSettingsTimeout ?? clampToStepTimeout(300 * 1000 + 2_000);
+      }
+      // Spawning should be fast, but allow some overhead for DB/queue work.
+      return normalizedSettingsTimeout ?? 60 * 1000;
+    }
+
+    if (toolName === 'capture_agent_events' || toolName === 'get_agent_status' || toolName === 'list_agents') {
+      return normalizedSettingsTimeout ?? 60 * 1000;
+    }
+
+    if (toolName === 'run_applescript') {
+      return normalizedSettingsTimeout ?? 120 * 1000;
     }
 
     return normalizedSettingsTimeout ?? TOOL_TIMEOUT_MS;
@@ -3180,6 +3222,16 @@ VERIFICATION STEP (REQUIRED):
    - Schedule types: "once" (one-time), "interval" (recurring), "cron" (cron expressions)
    - Make reminder prompts self-explanatory for when they fire later
 
+6. TASK / CONVERSATION HISTORY:
+   - Use task_history tool when the user asks about prior chats, "yesterday", "earlier", "last week", or "what did we talk about".
+   - Prefer task_history over filesystem exploration or log scraping.
+
+7. GOOGLE WORKSPACE (Gmail/Calendar/Drive):
+   - For Gmail/email/inbox requests, use gmail_action.
+   - For scheduling/meetings/invites requests, use calendar_action.
+   - For Drive file requests, use google_drive_action.
+   - If these tools fail with an auth/integration error (disabled, 401, reconnect required), DO NOT fall back to CLI workarounds for non-technical users. Ask the user to connect/reconnect in Settings > Integrations > Google Workspace.
+
 Format your plan as a JSON object with this structure:
 {
   "description": "Overall plan description",
@@ -3709,7 +3761,16 @@ SCHEDULING & REMINDERS:
   - "once": One-time task at a specific time (for reminders, single events)
   - "interval": Recurring at fixed intervals ("every 5m", "every 1h", "every 1d")
   - "cron": Standard cron expressions for complex schedules ("0 9 * * 1-5" for weekdays at 9am)
-- When creating reminders, make the prompt text descriptive so the reminder is self-explanatory when it fires.${personalityPrompt ? `\n\n${personalityPrompt}` : ''}${guidelinesPrompt ? `\n\n${guidelinesPrompt}` : ''}`;
+- When creating reminders, make the prompt text descriptive so the reminder is self-explanatory when it fires.
+
+GOOGLE WORKSPACE (Gmail/Calendar/Drive):
+- Prefer gmail_action, calendar_action, and google_drive_action for Google Workspace requests.
+- If these tools fail with an auth/integration error (disabled, 401, reconnect required), stop and ask the user to connect/reconnect in Settings > Integrations > Google Workspace.
+- For non-technical users, do NOT suggest CLI workarounds.
+
+TASK / CONVERSATION HISTORY:
+- Use the task_history tool to answer questions like "What did we talk about yesterday?", "What did I ask earlier today?", or "Show my recent tasks".
+- Prefer task_history over filesystem log scraping or directory exploration for conversation recall.${personalityPrompt ? `\n\n${personalityPrompt}` : ''}${guidelinesPrompt ? `\n\n${guidelinesPrompt}` : ''}`;
 
     const systemPromptTokens = estimateTokens(this.systemPrompt);
 
@@ -3785,6 +3846,9 @@ SCHEDULING & REMINDERS:
       const toolErrors = new Set<string>();
       let lastToolErrorReason = '';
       let awaitingUserInput = false;
+      let awaitingUserInputReason: string | null = null;
+      let pauseAfterNextAssistantMessage = false;
+      let pauseAfterNextAssistantMessageReason: string | null = null;
       let hadRunCommandFailure = false;
       let hadToolSuccessAfterRunCommandFailure = false;
       const expectsImageVerification = this.stepRequiresImageVerification(step);
@@ -3795,6 +3859,29 @@ SCHEDULING & REMINDERS:
       let foundNewImage = false;
       const maxIterations = 5;  // Reduced from 10 to prevent excessive iterations per step
       const maxEmptyResponses = 3;
+
+      const getUserActionRequiredPauseReason = (toolName: string, errorMessage: string): string | null => {
+        const message = typeof errorMessage === 'string' ? errorMessage : String(errorMessage || '');
+        const lower = message.toLowerCase();
+        if (!message) return null;
+
+        const settingsIntegrationHint =
+          /enable it in settings\s*>\s*integrations/i.test(lower) ||
+          /reconnect in settings\s*>\s*integrations/i.test(lower);
+
+        const isGoogleWorkspaceTool =
+          toolName === 'gmail_action' || toolName === 'calendar_action' || toolName === 'google_drive_action';
+
+        if (isGoogleWorkspaceTool && (lower.includes('integration is disabled') || lower.includes('authorization failed') || settingsIntegrationHint)) {
+          return 'Action required: Connect Google Workspace in Settings > Integrations > Google Workspace.';
+        }
+
+        if (settingsIntegrationHint) {
+          return 'Action required: Enable/reconnect the integration in Settings > Integrations, then try again.';
+        }
+
+        return null;
+      };
 
       while (continueLoop && iterationCount < maxIterations) {
         // Check if task is cancelled or already completed
@@ -3899,6 +3986,15 @@ SCHEDULING & REMINDERS:
             role: 'assistant',
             content: [{ type: 'text', text: 'I understand. Let me continue.' }],
           });
+        }
+
+        // If we hit an integration/auth setup error on a previous iteration, stop here.
+        // We already have enough info to guide the user; do not keep calling tools.
+        if (pauseAfterNextAssistantMessage) {
+          awaitingUserInput = true;
+          awaitingUserInputReason = pauseAfterNextAssistantMessageReason || 'Awaiting user input';
+          continueLoop = false;
+          continue;
         }
 
         // Handle tool calls
@@ -4151,6 +4247,13 @@ SCHEDULING & REMINDERS:
                 hadToolError = true;
                 toolErrors.add(content.name);
                 lastToolErrorReason = `Tool ${content.name} failed: ${reason}`;
+
+                const pauseReason = getUserActionRequiredPauseReason(content.name, result.error || reason);
+                if (pauseReason && !pauseAfterNextAssistantMessage) {
+                  pauseAfterNextAssistantMessage = true;
+                  pauseAfterNextAssistantMessageReason = pauseReason;
+                }
+
                 // Check if this is a non-retryable error
                 const shouldDisable = this.toolFailureTracker.recordFailure(content.name, result.error || reason);
                 if (shouldDisable) {
@@ -4215,6 +4318,12 @@ SCHEDULING & REMINDERS:
                 hadRunCommandFailure = true;
               }
 
+              const pauseReason = getUserActionRequiredPauseReason(content.name, error.message);
+              if (pauseReason && !pauseAfterNextAssistantMessage) {
+                pauseAfterNextAssistantMessage = true;
+                pauseAfterNextAssistantMessageReason = pauseReason;
+              }
+
               // Track the failure
               const shouldDisable = this.toolFailureTracker.recordFailure(content.name, error.message);
 
@@ -4229,6 +4338,7 @@ SCHEDULING & REMINDERS:
                 tool_use_id: content.id,
                 content: JSON.stringify({
                   error: error.message,
+                  ...(pauseReason ? { suggestion: pauseReason, action_required: true } : {}),
                   ...(shouldDisable ? { disabled: true, message: 'Tool has been disabled due to repeated failures.' } : {}),
                 }),
                 is_error: true,
@@ -4303,7 +4413,7 @@ SCHEDULING & REMINDERS:
       this.conversationHistory = messages;
 
       if (awaitingUserInput) {
-        throw new AwaitingUserInputError('Awaiting user input');
+        throw new AwaitingUserInputError(awaitingUserInputReason || 'Awaiting user input');
       }
 
       // Mark step as failed if all tools failed/were disabled
@@ -4616,7 +4726,16 @@ SCHEDULING & REMINDERS:
   - "once": One-time task at a specific time (for reminders, single events)
   - "interval": Recurring at fixed intervals ("every 5m", "every 1h", "every 1d")
   - "cron": Standard cron expressions for complex schedules ("0 9 * * 1-5" for weekdays at 9am)
-- When creating reminders, make the prompt text descriptive so the reminder is self-explanatory when it fires.${personalityPrompt ? `\n\n${personalityPrompt}` : ''}${guidelinesPrompt ? `\n\n${guidelinesPrompt}` : ''}`;
+- When creating reminders, make the prompt text descriptive so the reminder is self-explanatory when it fires.
+
+GOOGLE WORKSPACE (Gmail/Calendar/Drive):
+- Prefer gmail_action, calendar_action, and google_drive_action for Google Workspace requests.
+- If these tools fail with an auth/integration error (disabled, 401, reconnect required), stop and ask the user to connect/reconnect in Settings > Integrations > Google Workspace.
+- For non-technical users, do NOT suggest CLI workarounds.
+
+TASK / CONVERSATION HISTORY:
+- Use the task_history tool to answer questions like "What did we talk about yesterday?", "What did I ask earlier today?", or "Show my recent tasks".
+- Prefer task_history over filesystem log scraping or directory exploration for conversation recall.${personalityPrompt ? `\n\n${personalityPrompt}` : ''}${guidelinesPrompt ? `\n\n${guidelinesPrompt}` : ''}`;
     }
 
     const systemPromptTokens = estimateTokens(this.systemPrompt);

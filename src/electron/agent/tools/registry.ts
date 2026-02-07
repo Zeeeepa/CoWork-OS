@@ -259,20 +259,10 @@ export class ToolRegistry {
       allTools.push(...this.getOneDriveToolDefinitions());
     }
 
-    // Only add Google Drive tool if integration is enabled
-    if (GoogleDriveTools.isEnabled()) {
-      allTools.push(...this.getGoogleDriveToolDefinitions());
-    }
-
-    // Only add Gmail tool if integration is enabled
-    if (GmailTools.isEnabled()) {
-      allTools.push(...this.getGmailToolDefinitions());
-    }
-
-    // Only add Google Calendar tool if integration is enabled
-    if (GoogleCalendarTools.isEnabled()) {
-      allTools.push(...this.getGoogleCalendarToolDefinitions());
-    }
+    // Always add Google Workspace tools; they surface setup guidance when the integration isn't configured.
+    allTools.push(...this.getGoogleDriveToolDefinitions());
+    allTools.push(...this.getGmailToolDefinitions());
+    allTools.push(...this.getGoogleCalendarToolDefinitions());
 
     // Only add Dropbox tool if integration is enabled
     if (DropboxTools.isEnabled()) {
@@ -348,6 +338,7 @@ export class ToolRegistry {
       // Meta tools are always enabled
       if ([
         'revise_plan',
+        'task_history',
         'set_personality',
         'set_persona',
         'set_agent_name',
@@ -550,6 +541,36 @@ export class ToolRegistry {
   }
 
   /**
+   * Query prior task history from the local database.
+   * This is a privacy-sensitive tool; it may be blocked in shared gateway contexts.
+   */
+  private taskHistory(input: {
+    period: 'today' | 'yesterday' | 'last_7_days' | 'last_30_days' | 'custom';
+    from?: string;
+    to?: string;
+    limit?: number;
+    workspace_id?: string;
+    query?: string;
+    include_messages?: boolean;
+  }): any {
+    const period = input?.period;
+    const allowed: Array<typeof period> = ['today', 'yesterday', 'last_7_days', 'last_30_days', 'custom'];
+    if (!period || !allowed.includes(period)) {
+      throw new Error(`Invalid period. Expected one of: ${allowed.join(', ')}`);
+    }
+
+    return this.daemon.queryTaskHistory({
+      period,
+      from: input.from,
+      to: input.to,
+      limit: input.limit,
+      workspaceId: input.workspace_id,
+      query: input.query,
+      includeMessages: input.include_messages,
+    });
+  }
+
+  /**
    * Get human-readable tool descriptions
    */
   getToolDescriptions(): string {
@@ -676,13 +697,14 @@ Live Canvas (Visual Workspace):
 - canvas_list: List all active canvas sessions
 IMPORTANT: When using canvas_push, you MUST provide the 'content' parameter with the full HTML string to display.
 
-Plan Control:
-- revise_plan: Modify remaining plan steps when obstacles are encountered or new information discovered
-- switch_workspace: Switch to a different workspace/working directory. Use when you need to work in a different folder.
-- set_personality: Change the assistant's communication style (professional, friendly, concise, creative, technical, casual).
-- set_persona: Change the assistant's character persona (jarvis, friday, hal, computer, alfred, intern, sensei, pirate, noir, companion, or none).
-- set_response_style: Adjust response preferences (emoji_usage, response_length, code_comments, explanation_depth).
-- set_quirks: Set personality quirks (catchphrase, sign_off, analogy_domain).
+	Plan Control:
+	- revise_plan: Modify remaining plan steps when obstacles are encountered or new information discovered
+	- task_history: Query recent task history/messages (use for "what did we talk about yesterday?")
+	- switch_workspace: Switch to a different workspace/working directory. Use when you need to work in a different folder.
+	- set_personality: Change the assistant's communication style (professional, friendly, concise, creative, technical, casual).
+	- set_persona: Change the assistant's character persona (jarvis, friday, hal, computer, alfred, intern, sensei, pirate, noir, companion, or none).
+	- set_response_style: Adjust response preferences (emoji_usage, response_length, code_comments, explanation_depth).
+	- set_quirks: Set personality quirks (catchphrase, sign_off, analogy_domain).
 - set_agent_name: Set or change the assistant's name when the user wants to give you a name.
 - set_user_name: Store the user's name when they introduce themselves (e.g., "I'm Alice", "My name is Bob").`;
 
@@ -825,6 +847,10 @@ ${skillDescriptions}`;
     if (name === 'complete_mention') return await this.mentionTools.completeMention(input.mentionId);
 
     // Meta tools
+    if (name === 'task_history') {
+      return this.taskHistory(input);
+    }
+
     if (name === 'revise_plan') {
       if (!this.planRevisionHandler) {
         throw new Error('Plan revision not available at this time');
@@ -4076,6 +4102,50 @@ ${skillDescriptions}`;
               description: 'ID of an existing workspace to switch to',
             },
           },
+        },
+      },
+      {
+        name: 'task_history',
+        description:
+          'Query your recent task history and messages from the local database. ' +
+          'Use this to answer questions like "What did we talk about yesterday?", ' +
+          '"Show me my last 10 tasks", or "What did I ask earlier today?".',
+        input_schema: {
+          type: 'object',
+          properties: {
+            period: {
+              type: 'string',
+              enum: ['today', 'yesterday', 'last_7_days', 'last_30_days', 'custom'],
+              description: 'Time period to query',
+            },
+            from: {
+              type: 'string',
+              description:
+                'For custom: start time as ISO string (e.g., "2026-02-06T00:00:00Z"). If omitted, defaults are used.',
+            },
+            to: {
+              type: 'string',
+              description:
+                'For custom: end time as ISO string (e.g., "2026-02-07T00:00:00Z"). If omitted, defaults are used.',
+            },
+            limit: {
+              type: 'number',
+              description: 'Maximum number of tasks to return (1-50). Default: 20',
+            },
+            workspace_id: {
+              type: 'string',
+              description: 'Optional workspace ID to restrict results to',
+            },
+            query: {
+              type: 'string',
+              description: 'Optional substring filter applied to task title and prompt',
+            },
+            include_messages: {
+              type: 'boolean',
+              description: 'Include last user/assistant message per task (default: true)',
+            },
+          },
+          required: ['period'],
         },
       },
       {

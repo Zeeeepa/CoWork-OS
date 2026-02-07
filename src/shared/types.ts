@@ -169,7 +169,8 @@ export type ToolType =
   // SharePoint
   | 'sharepoint_action'
   // Meta tools
-  | 'revise_plan';
+  | 'revise_plan'
+  | 'task_history';
 
 export type ApprovalType =
   | 'delete_file'
@@ -264,6 +265,7 @@ export const TOOL_GROUPS = {
   'group:memory': [
     'read_clipboard',
     'write_clipboard',
+    'task_history',
   ],
   // Image generation - requires API access
   'group:image': [
@@ -338,6 +340,7 @@ export const TOOL_RISK_LEVELS: Record<ToolType, ToolRiskLevel> = {
   sharepoint_action: 'network',
   // Meta
   revise_plan: 'read',
+  task_history: 'read',
 };
 
 /**
