@@ -8,6 +8,11 @@ import { BrowserService } from '../browser/browser-service';
  */
 export class BrowserTools {
   private browserService: BrowserService;
+  private browserState: { headless: boolean; profile: string | null; browserChannel: 'chromium' | 'chrome' } = {
+    headless: true,
+    profile: null,
+    browserChannel: 'chromium',
+  };
 
   constructor(
     private workspace: Workspace,
@@ -26,11 +31,49 @@ export class BrowserTools {
    */
   setWorkspace(workspace: Workspace): void {
     this.workspace = workspace;
-    // Recreate browser service with new workspace
+    // Recreate browser service with new workspace (and reset to defaults)
     this.browserService = new BrowserService(workspace, {
       headless: true,
       timeout: 90000
     });
+    this.browserState = { headless: true, profile: null, browserChannel: 'chromium' };
+  }
+
+  private getPersistentUserDataDir(profile: string): string {
+    const safe = path
+      .basename(profile.trim())
+      .replace(/[^a-zA-Z0-9._-]+/g, '_')
+      .slice(0, 64) || 'default';
+    return path.join(this.workspace.path, '.cowork', 'browser-profiles', safe);
+  }
+
+  private async ensureBrowserConfigured(opts: { headless?: unknown; profile?: unknown; browser_channel?: unknown }): Promise<void> {
+    const requestedHeadless = typeof opts.headless === 'boolean' ? opts.headless : undefined;
+    const profileRaw = typeof opts.profile === 'string' ? opts.profile.trim() : undefined;
+    const requestedProfile = profileRaw !== undefined ? (profileRaw ? profileRaw : null) : undefined;
+    const channelRaw = typeof opts.browser_channel === 'string' ? opts.browser_channel.trim().toLowerCase() : '';
+    const requestedChannel = channelRaw === 'chrome' || channelRaw === 'chromium' ? channelRaw : undefined;
+
+    const nextHeadless = requestedHeadless ?? this.browserState.headless;
+    const nextProfile = requestedProfile ?? this.browserState.profile;
+    const nextChannel = requestedChannel ?? this.browserState.browserChannel;
+
+    if (
+      nextHeadless === this.browserState.headless &&
+      nextProfile === this.browserState.profile &&
+      nextChannel === this.browserState.browserChannel
+    ) {
+      return;
+    }
+
+    await this.browserService.close();
+    this.browserService = new BrowserService(this.workspace, {
+      headless: nextHeadless,
+      timeout: 90000,
+      userDataDir: nextProfile ? this.getPersistentUserDataDir(nextProfile) : undefined,
+      channel: nextChannel,
+    });
+    this.browserState = { headless: nextHeadless, profile: nextProfile, browserChannel: nextChannel };
   }
 
   /**
@@ -42,6 +85,9 @@ export class BrowserTools {
         name: 'browser_navigate',
         description:
           'Navigate the browser to a URL. Opens the browser if not already open. ' +
+          'Optional: set headless=false to open a visible browser window. ' +
+          'Optional: set profile to enable a persistent browser profile (cookies/storage persist across tasks). ' +
+          'Optional: set browser_channel="chrome" to use system Google Chrome (otherwise uses bundled Chromium). ' +
           'NOTE: For RESEARCH tasks (finding news, trends, discussions), use web_search instead - it aggregates results from multiple sources. ' +
           'For simply reading a specific URL, use web_fetch - it is faster and lighter. ' +
           'Use browser_navigate ONLY when you need to interact with the page (click, fill forms, take screenshots) or when the page requires JavaScript rendering.',
@@ -56,6 +102,20 @@ export class BrowserTools {
               type: 'string',
               enum: ['load', 'domcontentloaded', 'networkidle'],
               description: 'When to consider navigation complete. Default: load'
+            },
+            headless: {
+              type: 'boolean',
+              description: 'Run browser headless (default: true). Set false for a visible window.'
+            },
+            profile: {
+              type: 'string',
+              description:
+                'Optional persistent profile name. If set, cookies/storage persist across tasks under .cowork/browser-profiles/<profile>.'
+            },
+            browser_channel: {
+              type: 'string',
+              enum: ['chromium', 'chrome'],
+              description: 'Which browser binary to use (default: chromium). "chrome" requires Google Chrome installed.'
             }
           },
           required: ['url']
@@ -312,6 +372,11 @@ export class BrowserTools {
   async executeTool(toolName: string, input: any): Promise<any> {
     switch (toolName) {
       case 'browser_navigate': {
+        await this.ensureBrowserConfigured({
+          headless: input?.headless,
+          profile: input?.profile,
+          browser_channel: input?.browser_channel,
+        });
         const result = await this.browserService.navigate(
           input.url,
           input.wait_until || 'load'

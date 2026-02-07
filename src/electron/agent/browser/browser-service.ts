@@ -8,6 +8,18 @@ export interface BrowserOptions {
   headless?: boolean;
   timeout?: number;
   viewport?: { width: number; height: number };
+  /**
+   * If set, Playwright will use a persistent browser context rooted at this directory
+   * (cookies/storage survive across tasks and restarts).
+   *
+   * WARNING: This can contain sensitive auth state.
+   */
+  userDataDir?: string;
+  /**
+   * Which Chromium channel to use. "chromium" uses Playwright's bundled Chromium.
+   * "chrome" uses the system-installed Google Chrome (if available).
+   */
+  channel?: 'chromium' | 'chrome';
 }
 
 export interface NavigateResult {
@@ -81,22 +93,35 @@ export class BrowserService {
    * Uses try-finally to ensure cleanup on errors
    */
   async init(): Promise<void> {
-    if (this.browser) return;
+    if (this.context && this.page) return;
 
     let browser: Browser | null = null;
     let context: BrowserContext | null = null;
 
     try {
-      browser = await chromium.launch({
-        headless: this.options.headless
-      });
+      const channel = this.options.channel === 'chrome' ? 'chrome' : undefined;
 
-      context = await browser.newContext({
-        viewport: this.options.viewport,
-        userAgent: 'CoWork OS Browser Automation'
-      });
+      if (this.options.userDataDir) {
+        await fs.mkdir(this.options.userDataDir, { recursive: true });
 
-      const page = await context.newPage();
+        context = await chromium.launchPersistentContext(this.options.userDataDir, {
+          headless: this.options.headless,
+          ...(channel ? { channel } : {}),
+          viewport: this.options.viewport,
+        });
+        browser = context.browser();
+      } else {
+        browser = await chromium.launch({
+          headless: this.options.headless,
+          ...(channel ? { channel } : {}),
+        });
+
+        context = await browser.newContext({
+          viewport: this.options.viewport,
+        });
+      }
+
+      const page = context.pages()[0] ?? await context.newPage();
       page.setDefaultTimeout(this.options.timeout!);
 
       // Only assign to instance variables after all operations succeed
@@ -689,7 +714,7 @@ export class BrowserService {
    * Check if browser is open
    */
   isOpen(): boolean {
-    return this.browser !== null && this.page !== null;
+    return this.context !== null && this.page !== null;
   }
 
   /**
