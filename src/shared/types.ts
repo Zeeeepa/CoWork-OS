@@ -121,6 +121,7 @@ export type ToolType =
   | 'run_skill'
   | 'run_command'
   | 'generate_image'
+  | 'analyze_image'
   // System tools
   | 'system_info'
   | 'read_clipboard'
@@ -263,6 +264,8 @@ export const TOOL_GROUPS = {
     'browser_reload',
     'browser_save_pdf',
     'browser_close',
+    // Vision (image understanding via external provider)
+    'analyze_image',
   ],
   // Memory/sensitive tools - restricted in shared contexts
   'group:memory': [
@@ -272,6 +275,8 @@ export const TOOL_GROUPS = {
     // Privacy-sensitive: exposes prior chat logs across chats
     'channel_list_chats',
     'channel_history',
+    // Privacy-sensitive: can exfiltrate local files/images to a provider
+    'analyze_image',
   ],
   // Image generation - requires API access
   'group:image': [
@@ -316,6 +321,7 @@ export const TOOL_RISK_LEVELS: Record<ToolType, ToolRiskLevel> = {
   show_in_folder: 'system',
   // Network operations
   generate_image: 'network',
+  analyze_image: 'network',
   web_search: 'network',
   voice_call: 'network',
   browser_navigate: 'network',

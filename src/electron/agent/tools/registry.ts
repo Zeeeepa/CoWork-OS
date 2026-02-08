@@ -13,6 +13,7 @@ import { EditTools } from './edit-tools';
 import { BrowserTools } from './browser-tools';
 import { ShellTools } from './shell-tools';
 import { ImageTools } from './image-tools';
+import { VisionTools } from './vision-tools';
 import { SystemTools } from './system-tools';
 import { CronTools } from './cron-tools';
 import { CanvasTools } from './canvas-tools';
@@ -28,6 +29,8 @@ import { DropboxTools } from './dropbox-tools';
 import { SharePointTools } from './sharepoint-tools';
 import { VoiceCallTools } from './voice-call-tools';
 import { ChannelTools } from './channel-tools';
+import { EmailImapTools } from './email-imap-tools';
+import { ChannelRepository } from '../../database/repositories';
 import { readFilesByPatterns } from './read-files';
 import { LLMTool } from '../llm/types';
 import { SearchProviderFactory } from '../search';
@@ -54,6 +57,7 @@ export class ToolRegistry {
   private browserTools: BrowserTools;
   private shellTools: ShellTools;
   private imageTools: ImageTools;
+  private visionTools: VisionTools;
   private systemTools: SystemTools;
   private cronTools: CronTools;
   private canvasTools: CanvasTools;
@@ -69,9 +73,11 @@ export class ToolRegistry {
   private sharePointTools: SharePointTools;
   private voiceCallTools: VoiceCallTools;
   private channelTools?: ChannelTools;
+  private emailImapTools?: EmailImapTools;
   private gatewayContext?: GatewayContextType;
   private deniedTools: Set<string> = new Set();
   private deniedGroups: Set<ToolGroupName> = new Set();
+  private denyAllTools = false;
   private shadowedToolsLogged = false;
 
   constructor(
@@ -91,6 +97,7 @@ export class ToolRegistry {
     this.browserTools = new BrowserTools(workspace, daemon, taskId);
     this.shellTools = new ShellTools(workspace, daemon, taskId);
     this.imageTools = new ImageTools(workspace, daemon, taskId);
+    this.visionTools = new VisionTools(workspace, daemon, taskId);
     this.systemTools = new SystemTools(workspace, daemon, taskId);
     this.cronTools = new CronTools(workspace, daemon, taskId);
     this.canvasTools = new CanvasTools(workspace, daemon, taskId);
@@ -108,7 +115,9 @@ export class ToolRegistry {
     // Some unit tests stub daemon as a plain object. Make channel history tools optional.
     const dbGetter = (daemon as any)?.getDatabase;
     if (typeof dbGetter === 'function') {
-      this.channelTools = new ChannelTools(dbGetter.call(daemon), daemon, taskId);
+      const db = dbGetter.call(daemon);
+      this.channelTools = new ChannelTools(db, daemon, taskId);
+      this.emailImapTools = new EmailImapTools(db, daemon, taskId);
     }
     this.gatewayContext = gatewayContext;
     this.applyToolRestrictions(toolRestrictions);
@@ -117,11 +126,18 @@ export class ToolRegistry {
   private applyToolRestrictions(restrictions?: string[]): void {
     this.deniedTools = new Set();
     this.deniedGroups = new Set();
+    this.denyAllTools = false;
     if (!restrictions || restrictions.length === 0) return;
 
     for (const raw of restrictions) {
       const value = typeof raw === 'string' ? raw.trim() : '';
       if (!value) continue;
+
+      // Special marker meaning "deny all tools" (used as a safe default on corrupted policy data).
+      if (value === '*') {
+        this.denyAllTools = true;
+        continue;
+      }
 
       // Context policies may specify tool group names (e.g., "group:memory") or
       // individual tool names (e.g., "read_clipboard").
@@ -156,6 +172,7 @@ export class ToolRegistry {
     this.browserTools.setWorkspace(workspace);
     this.shellTools.setWorkspace(workspace);
     this.imageTools.setWorkspace(workspace);
+    this.visionTools.setWorkspace(workspace);
     this.systemTools.setWorkspace(workspace);
     this.cronTools.setWorkspace(workspace);
     this.canvasTools.setWorkspace(workspace);
@@ -213,6 +230,9 @@ export class ToolRegistry {
    * Check if a tool is allowed based on security policy
    */
   isToolAllowed(toolName: string): boolean {
+    if (this.denyAllTools) {
+      return false;
+    }
     if (this.deniedTools.has(toolName)) {
       return false;
     }
@@ -266,10 +286,17 @@ export class ToolRegistry {
       allTools.push(...this.getOneDriveToolDefinitions());
     }
 
-    // Always add Google Workspace tools; they surface setup guidance when the integration isn't configured.
-    allTools.push(...this.getGoogleDriveToolDefinitions());
-    allTools.push(...this.getGmailToolDefinitions());
-    allTools.push(...this.getGoogleCalendarToolDefinitions());
+    // Only add Google Workspace tools if the integration is enabled.
+    // When disabled, exposing these tools causes the planner to repeatedly choose them and fail.
+    if (GoogleDriveTools.isEnabled()) {
+      allTools.push(...this.getGoogleDriveToolDefinitions());
+    }
+    if (GmailTools.isEnabled()) {
+      allTools.push(...this.getGmailToolDefinitions());
+    }
+    if (GoogleCalendarTools.isEnabled()) {
+      allTools.push(...this.getGoogleCalendarToolDefinitions());
+    }
 
     // Only add Dropbox tool if integration is enabled
     if (DropboxTools.isEnabled()) {
@@ -292,6 +319,9 @@ export class ToolRegistry {
     // Always add image tools; they will surface setup guidance if API keys are missing
     allTools.push(...ImageTools.getToolDefinitions());
 
+    // Vision tools (image understanding); may surface setup guidance if API keys are missing
+    allTools.push(...VisionTools.getToolDefinitions());
+
     // Always add system tools (they enable broader system interaction)
     allTools.push(...SystemTools.getToolDefinitions());
 
@@ -307,6 +337,11 @@ export class ToolRegistry {
     // Channel history tools (local gateway message log)
     if (this.channelTools) {
       allTools.push(...ChannelTools.getToolDefinitions());
+    }
+
+    // Email IMAP tools (direct mailbox access, only if configured/enabled)
+    if (this.emailImapTools && this.emailImapTools.isAvailable()) {
+      allTools.push(...EmailImapTools.getToolDefinitions());
     }
 
     // Add meta tools for execution control
@@ -586,7 +621,40 @@ export class ToolRegistry {
    * Get human-readable tool descriptions
    */
   getToolDescriptions(): string {
+    const googleWorkspaceEnabled =
+      GmailTools.isEnabled() || GoogleCalendarTools.isEnabled() || GoogleDriveTools.isEnabled();
+
+    let emailChannelStatus = 'unknown';
+    try {
+      // Some unit tests stub daemon as a plain object. Keep this best-effort.
+      const dbGetter = (this.daemon as any)?.getDatabase;
+      if (typeof dbGetter === 'function') {
+        const channelRepo = new ChannelRepository(dbGetter.call(this.daemon));
+        const emailChannel = channelRepo.findByType('email');
+        if (!emailChannel) {
+          emailChannelStatus = 'not configured';
+        } else {
+          const enabledText = emailChannel.enabled ? 'enabled' : 'configured (disabled)';
+          const statusText = typeof emailChannel.status === 'string' && emailChannel.status.trim().length > 0
+            ? emailChannel.status.trim()
+            : 'unknown';
+          const hint = statusText === 'error'
+            ? ' (currently failing to connect; check Settings > Channels > Email)'
+            : '';
+          emailChannelStatus = `${enabledText}, status=${statusText}${hint}`;
+        }
+      } else {
+        emailChannelStatus = 'unavailable (no database access in this context)';
+      }
+    } catch {
+      emailChannelStatus = 'unknown (failed to read local channel config)';
+    }
+
     let descriptions = `
+Integration Status:
+- Google Workspace integration (gmail_action/calendar_action/google_drive_action): ${googleWorkspaceEnabled ? 'ENABLED' : 'DISABLED (enable in Settings > Integrations > Google Workspace)'}
+- Email channel (IMAP/SMTP): ${emailChannelStatus}
+
 File Operations:
 - read_file: Read contents of a file (supports plain text, DOCX, and PDF)
 - read_files: Read multiple files matched by glob patterns (supports exclusion patterns with leading "!")
@@ -672,6 +740,13 @@ Image Generation (Nano Banana):
   - nano-banana: Fast generation for quick iterations
   - nano-banana-pro: High-quality generation for production use
   - Requires Gemini API key; the tool will prompt setup guidance if missing.`;
+
+    descriptions += `
+
+Vision (Image Understanding):
+- analyze_image: Analyze an image file from the workspace (screenshots/photos)
+  - Extract text, describe items, answer questions, summarize what is shown
+  - Uses a vision-capable provider (OpenAI/Anthropic/Gemini); the tool will prompt setup guidance if missing.`;
 
     // System tools are always available
     descriptions += `
@@ -825,6 +900,9 @@ ${skillDescriptions}`;
     // Image tools
     if (name === 'generate_image') return await this.imageTools.generateImage(input);
 
+    // Vision tools
+    if (name === 'analyze_image') return await this.visionTools.analyzeImage(input);
+
     // System tools
     if (name === 'system_info') return await this.systemTools.getSystemInfo();
     if (name === 'search_memories') return await this.systemTools.searchMemories(input);
@@ -865,6 +943,14 @@ ${skillDescriptions}`;
       }
       if (name === 'channel_list_chats') return await this.channelTools.listChats(input);
       return await this.channelTools.channelHistory(input);
+    }
+
+    // Email IMAP tools (direct inbox access)
+    if (name === 'email_imap_unread') {
+      if (!this.emailImapTools) {
+        throw new Error('Email IMAP tools unavailable (database not accessible)');
+      }
+      return await this.emailImapTools.listUnread(input);
     }
 
     // Mention tools (multi-agent collaboration)
