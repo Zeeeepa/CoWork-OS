@@ -714,7 +714,7 @@ type CronSchedule =
   | { kind: 'every'; everyMs: number; anchorMs?: number }
   | { kind: 'cron'; expr: string; tz?: string };
 
-type CronJobStatus = 'ok' | 'error' | 'skipped';
+type CronJobStatus = 'ok' | 'error' | 'skipped' | 'timeout';
 
 interface CronRunHistoryEntry {
   runAtMs: number;
@@ -740,7 +740,7 @@ interface CronJobState {
 
 interface CronDeliveryConfig {
   enabled: boolean;
-  channelType?: 'telegram' | 'discord' | 'slack' | 'whatsapp';
+  channelType?: 'telegram' | 'discord' | 'slack' | 'whatsapp' | 'imessage' | 'signal' | 'mattermost' | 'matrix' | 'twitch' | 'line' | 'bluebubbles' | 'email' | 'teams' | 'googlechat';
   channelId?: string;
   deliverOnSuccess?: boolean;
   deliverOnError?: boolean;

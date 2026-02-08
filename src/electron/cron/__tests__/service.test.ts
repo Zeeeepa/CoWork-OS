@@ -477,6 +477,89 @@ describe('CronService', () => {
       );
     });
 
+    it('should render custom template variables', async () => {
+      service = createService({
+        nowMs: () => 1000000,
+        resolveTemplateVariables: async () => ({ foo: 'bar' }),
+      });
+      await service.start();
+
+      await service.add({
+        name: 'Template Test',
+        enabled: true,
+        workspaceId: 'ws-1',
+        taskPrompt: 'Hello {{foo}}',
+        schedule: { kind: 'at', atMs: 900000 }, // Past time
+        state: { nextRunAtMs: 900000 },
+      });
+
+      await service.run('job-1', 'force');
+
+      expect(mockCreateTask).toHaveBeenCalledWith(
+        expect.objectContaining({
+          prompt: 'Hello bar',
+        })
+      );
+    });
+
+    it('should skip delivery when deliverOnlyIfResult is enabled and no result is available', async () => {
+      const deliverToChannel = vi.fn().mockResolvedValue(undefined);
+      service = createService({
+        nowMs: () => 1000000,
+        deliverToChannel,
+      });
+      await service.start();
+
+      await service.add({
+        name: 'Delivery Test',
+        enabled: true,
+        workspaceId: 'ws-1',
+        taskPrompt: 'Do work',
+        schedule: { kind: 'at', atMs: 900000 }, // Past time
+        state: { nextRunAtMs: 900000 },
+        delivery: {
+          enabled: true,
+          channelType: 'telegram' as any,
+          channelId: 'chat-1',
+          deliverOnlyIfResult: true,
+        },
+      });
+
+      await service.run('job-1', 'force');
+
+      expect(deliverToChannel).not.toHaveBeenCalled();
+    });
+
+    it('should deliver when deliverOnlyIfResult is enabled and a non-empty result is available', async () => {
+      const deliverToChannel = vi.fn().mockResolvedValue(undefined);
+      service = createService({
+        nowMs: () => 1000000,
+        deliverToChannel,
+        getTaskStatus: async () => ({ status: 'completed' }),
+        getTaskResultText: async () => 'OK',
+      });
+      await service.start();
+
+      await service.add({
+        name: 'Delivery Test 2',
+        enabled: true,
+        workspaceId: 'ws-1',
+        taskPrompt: 'Do work',
+        schedule: { kind: 'at', atMs: 900000 }, // Past time
+        state: { nextRunAtMs: 900000 },
+        delivery: {
+          enabled: true,
+          channelType: 'telegram' as any,
+          channelId: 'chat-1',
+          deliverOnlyIfResult: true,
+        },
+      });
+
+      await service.run('job-1', 'force');
+
+      expect(deliverToChannel).toHaveBeenCalledTimes(1);
+    });
+
     it('should return not-found for non-existent job', async () => {
       service = createService();
       await service.start();

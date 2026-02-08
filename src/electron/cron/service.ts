@@ -42,7 +42,7 @@ const defaultLog = {
 };
 
 interface CronServiceState {
-  deps: Required<Omit<CronServiceDeps, 'nowMs' | 'onEvent' | 'log' | 'maxConcurrentRuns' | 'defaultTimeoutMs' | 'maxHistoryEntries' | 'webhook' | 'deliverToChannel'>> & {
+  deps: Required<Omit<CronServiceDeps, 'nowMs' | 'onEvent' | 'log' | 'maxConcurrentRuns' | 'defaultTimeoutMs' | 'maxHistoryEntries' | 'webhook' | 'deliverToChannel' | 'getTaskStatus' | 'getTaskResultText' | 'resolveTemplateVariables'>> & {
     nowMs: () => number;
     onEvent?: (evt: CronEvent) => void;
     log: typeof defaultLog;
@@ -50,7 +50,10 @@ interface CronServiceState {
     defaultTimeoutMs: number;
     maxHistoryEntries: number;
     webhook?: CronWebhookConfig;
+    getTaskStatus?: CronServiceDeps['getTaskStatus'];
+    getTaskResultText?: CronServiceDeps['getTaskResultText'];
     deliverToChannel?: CronServiceDeps['deliverToChannel'];
+    resolveTemplateVariables?: CronServiceDeps['resolveTemplateVariables'];
   };
   store: CronStoreFile | null;
   timer: ReturnType<typeof setTimeout> | null;
@@ -73,7 +76,10 @@ export class CronService {
         defaultTimeoutMs: deps.defaultTimeoutMs ?? DEFAULT_JOB_TIMEOUT_MS,
         maxHistoryEntries: deps.maxHistoryEntries ?? DEFAULT_MAX_HISTORY_ENTRIES,
         webhook: deps.webhook,
+        getTaskStatus: deps.getTaskStatus,
+        getTaskResultText: deps.getTaskResultText,
         deliverToChannel: deps.deliverToChannel,
+        resolveTemplateVariables: deps.resolveTemplateVariables,
       },
       store: null,
       timer: null,
@@ -471,6 +477,7 @@ export class CronService {
     log.info(`Executing job: ${job.name} (${job.id})`);
     this.emit({ jobId: job.id, action: 'started', runAtMs: nowMs });
 
+    const prevRunAtMs = job.state.lastRunAtMs;
     job.state.runningAtMs = nowMs;
     job.state.lastRunAtMs = nowMs;
 
@@ -478,20 +485,85 @@ export class CronService {
     let taskId: string | undefined;
     let status: 'ok' | 'error' | 'timeout' = 'ok';
     let errorMsg: string | undefined;
+    let resultText: string | undefined;
 
     try {
+      const renderedPrompt = await this.renderTaskPrompt(job, nowMs, prevRunAtMs);
+
       // Create a task with optional model override
       const result = await deps.createTask({
         title: job.taskTitle || `Scheduled: ${job.name}`,
-        prompt: job.taskPrompt,
+        prompt: renderedPrompt,
         workspaceId: job.workspaceId,
         modelKey: job.modelKey,
         allowUserInput: false,
+        agentConfig: job.taskAgentConfig,
       });
 
       taskId = result.id;
       job.state.lastTaskId = taskId;
       log.info(`Job ${job.name} created task ${taskId}`);
+
+      // If task status hooks are available, wait for completion and capture the final output.
+      if (deps.getTaskStatus) {
+        const timeoutMs = Math.max(1, Math.floor(job.timeoutMs ?? deps.defaultTimeoutMs));
+        const deadlineMs = deps.nowMs() + timeoutMs;
+        const pollMs = 1500;
+
+        while (deps.nowMs() < deadlineMs) {
+          const task = await deps.getTaskStatus(taskId);
+          if (!task) {
+            status = 'error';
+            errorMsg = 'Task not found';
+            break;
+          }
+
+          const taskStatus = typeof task.status === 'string' ? task.status : '';
+          if (taskStatus === 'completed') {
+            status = 'ok';
+            break;
+          }
+          if (taskStatus === 'failed' || taskStatus === 'cancelled') {
+            status = 'error';
+            errorMsg = task.error || `Task ${taskStatus}`;
+            break;
+          }
+          if (taskStatus === 'paused' || taskStatus === 'blocked') {
+            status = 'error';
+            errorMsg = `Task ${taskStatus}`;
+            break;
+          }
+
+          // Sleep (bounded by remaining time)
+          const remaining = deadlineMs - deps.nowMs();
+          const sleepMs = Math.max(0, Math.min(pollMs, remaining));
+          if (sleepMs === 0) break;
+          await new Promise((r) => setTimeout(r, sleepMs));
+        }
+
+        if (status === 'ok' && deps.nowMs() >= deadlineMs) {
+          // One last check to avoid misclassifying a completed task as a timeout.
+          const finalTask = await deps.getTaskStatus(taskId);
+          const finalStatus = typeof finalTask?.status === 'string' ? finalTask.status : '';
+          if (finalStatus === 'completed') {
+            status = 'ok';
+          } else if (finalStatus === 'failed' || finalStatus === 'cancelled') {
+            status = 'error';
+            errorMsg = finalTask?.error || `Task ${finalStatus || 'failed'}`;
+          } else {
+            status = 'timeout';
+            errorMsg = `Timed out after ${Math.round(timeoutMs / 1000)}s`;
+          }
+        }
+
+        if (status === 'ok' && deps.getTaskResultText) {
+          try {
+            resultText = await deps.getTaskResultText(taskId);
+          } catch (e) {
+            log.warn('Failed to load task result text', e);
+          }
+        }
+      }
     } catch (error) {
       errorMsg = error instanceof Error ? error.message : String(error);
       status = 'error';
@@ -550,7 +622,7 @@ export class CronService {
     this.armTimer();
 
     // Deliver results to channel if configured
-    await this.deliverToChannel(job, status, taskId, errorMsg);
+    await this.deliverToChannel(job, status, taskId, errorMsg, resultText);
 
     this.emit({
       jobId: job.id,
@@ -577,7 +649,8 @@ export class CronService {
     job: CronJob,
     status: 'ok' | 'error' | 'timeout',
     taskId?: string,
-    error?: string
+    error?: string,
+    resultText?: string
   ): Promise<void> {
     const { deps, log } = this.getContext();
 
@@ -586,7 +659,7 @@ export class CronService {
       return;
     }
 
-    const { channelType, channelId, deliverOnSuccess, deliverOnError, summaryOnly } = job.delivery;
+    const { channelType, channelId, deliverOnSuccess, deliverOnError, summaryOnly, deliverOnlyIfResult } = job.delivery;
 
     // Check if we should deliver based on status
     const isSuccess = status === 'ok';
@@ -594,6 +667,11 @@ export class CronService {
 
     if (!shouldDeliver || !channelType || !channelId) {
       return;
+    }
+
+    if (status === 'ok' && deliverOnlyIfResult) {
+      const hasNonEmpty = typeof resultText === 'string' && resultText.trim().length > 0;
+      if (!hasNonEmpty) return;
     }
 
     try {
@@ -605,11 +683,62 @@ export class CronService {
         taskId,
         error,
         summaryOnly,
+        resultText,
       });
       log.info(`Delivered results for job "${job.name}" to ${channelType}:${channelId}`);
     } catch (deliveryError) {
       log.error(`Failed to deliver results for job "${job.name}":`, deliveryError);
     }
+  }
+
+  private async renderTaskPrompt(job: CronJob, runAtMs: number, prevRunAtMs?: number): Promise<string> {
+    const { deps, log } = this.getContext();
+    const template = job.taskPrompt;
+    if (typeof template !== 'string' || template.length === 0) return template;
+
+    const formatLocalYmd = (d: Date): string =>
+      `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+
+    const base = new Date(runAtMs);
+    const today = formatLocalYmd(base);
+    const tomorrowDate = new Date(base);
+    tomorrowDate.setDate(base.getDate() + 1);
+    const tomorrow = formatLocalYmd(tomorrowDate);
+    const weekEndDate = new Date(base);
+    weekEndDate.setDate(base.getDate() + 6);
+    const weekEnd = formatLocalYmd(weekEndDate);
+
+    let rendered = template
+      // Keep compatibility with ES2020 builds (String.prototype.replaceAll is ES2021).
+      .split('{{now}}').join(base.toISOString())
+      .split('{{date}}').join(today)
+      .split('{{today}}').join(today)
+      .split('{{tomorrow}}').join(tomorrow)
+      .split('{{week_end}}').join(weekEnd);
+
+    const vars: Record<string, string> = {
+      prev_run: prevRunAtMs ? new Date(prevRunAtMs).toISOString() : '',
+    };
+
+    if (deps.resolveTemplateVariables) {
+      try {
+        const extra = await deps.resolveTemplateVariables({ job, runAtMs, prevRunAtMs });
+        if (extra && typeof extra === 'object') {
+          for (const [k, v] of Object.entries(extra)) {
+            if (!k) continue;
+            vars[k] = typeof v === 'string' ? v : String(v);
+          }
+        }
+      } catch (e) {
+        log.warn('Template variable resolution failed', e);
+      }
+    }
+
+    for (const [k, v] of Object.entries(vars)) {
+      rendered = rendered.split(`{{${k}}}`).join(v);
+    }
+
+    return rendered;
   }
 
   /**

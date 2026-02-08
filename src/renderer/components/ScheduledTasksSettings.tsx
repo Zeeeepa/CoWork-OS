@@ -11,7 +11,7 @@ interface CronJobState {
   nextRunAtMs?: number;
   runningAtMs?: number;
   lastRunAtMs?: number;
-  lastStatus?: 'ok' | 'error' | 'skipped';
+  lastStatus?: 'ok' | 'error' | 'skipped' | 'timeout';
   lastError?: string;
   lastDurationMs?: number;
   lastTaskId?: string;

@@ -2,6 +2,9 @@
  * Cron/Scheduled Task Types for CoWork OS
  */
 
+import type { ChannelType } from '../gateway/channels/types';
+import type { AgentConfig } from '../../shared/types';
+
 /**
  * Schedule type definitions:
  * - "at": Run once at a specific timestamp
@@ -53,11 +56,12 @@ export interface CronJobState {
  */
 export interface CronDeliveryConfig {
   enabled: boolean;
-  channelType?: 'telegram' | 'discord' | 'slack' | 'whatsapp';
-  channelId?: string; // The channel/chat ID to deliver to
+  channelType?: ChannelType;
+  channelId?: string; // chatId / conversation ID to deliver to
   deliverOnSuccess?: boolean;
   deliverOnError?: boolean;
   summaryOnly?: boolean; // Only send a summary, not the full result
+  deliverOnlyIfResult?: boolean; // Only deliver on success when a non-empty result is available
 }
 
 /**
@@ -80,6 +84,8 @@ export interface CronJob {
   timeoutMs?: number; // Maximum execution time (default: no timeout)
   modelKey?: string; // Specific model to use (e.g., 'sonnet-3-5', 'opus-3')
   maxHistoryEntries?: number; // Max run history entries to keep (default: 10)
+  // Agent config (tool restrictions, gateway context, etc.)
+  taskAgentConfig?: AgentConfig;
   // Channel delivery
   delivery?: CronDeliveryConfig;
   // Runtime state
@@ -133,22 +139,36 @@ export interface CronServiceDeps {
   defaultTimeoutMs?: number; // Default job timeout (default: 30 minutes)
   maxHistoryEntries?: number; // Default max history entries per job (default: 10)
   webhook?: CronWebhookConfig; // Webhook server configuration
+  /**
+   * Optional template variable resolver for job prompts.
+   * Variables are referenced as `{{var_name}}` and substituted before task creation.
+   */
+  resolveTemplateVariables?: (params: {
+    job: CronJob;
+    runAtMs: number;
+    prevRunAtMs?: number;
+  }) => Promise<Record<string, string>>;
   createTask: (params: {
     title: string;
     prompt: string;
     workspaceId: string;
     modelKey?: string; // Optional model override
     allowUserInput?: boolean; // Whether task can pause awaiting user input
+    agentConfig?: AgentConfig; // Optional agent config override (gateway context, tool restrictions, etc.)
   }) => Promise<{ id: string }>;
+  // Optional task status hooks (enables waiting for completion + delivering final output)
+  getTaskStatus?: (taskId: string) => Promise<{ status: string; error?: string | null; resultSummary?: string | null } | null>;
+  getTaskResultText?: (taskId: string) => Promise<string | undefined>;
   // Channel delivery handler for sending results to messaging platforms
   deliverToChannel?: (params: {
-    channelType: 'telegram' | 'discord' | 'slack' | 'whatsapp';
+    channelType: ChannelType;
     channelId: string;
     jobName: string;
     status: CronJobStatus;
     taskId?: string;
     error?: string;
     summaryOnly?: boolean;
+    resultText?: string;
   }) => Promise<void>;
   onEvent?: (evt: CronEvent) => void;
   log?: {

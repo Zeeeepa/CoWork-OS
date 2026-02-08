@@ -15,10 +15,18 @@ import { MentionRepository } from './agents/MentionRepository';
 import { ActivityRepository } from './activity/ActivityRepository';
 import { WorkingStateRepository } from './agents/WorkingStateRepository';
 import { AgentDaemon } from './agent/daemon';
-import { TaskRepository, WorkspaceRepository } from './database/repositories';
+import {
+  ChannelMessageRepository,
+  ChannelRepository,
+  ChannelUserRepository,
+  TaskEventRepository,
+  TaskRepository,
+  WorkspaceRepository,
+} from './database/repositories';
 import { LLMProviderFactory } from './agent/llm';
 import { SearchProviderFactory } from './agent/search';
 import { ChannelGateway } from './gateway';
+import { formatChatTranscriptForPrompt } from './gateway/chat-transcript';
 import { updateManager } from './updater';
 import { migrateEnvToSettings } from './utils/env-migration';
 import { GuardrailManager } from './guardrails/guardrail-manager';
@@ -189,6 +197,13 @@ app.whenReady().then(async () => {
 
   // Initialize Cron Service for scheduled task execution
   try {
+    const db = dbManager.getDatabase();
+    const taskRepo = new TaskRepository(db);
+    const taskEventRepo = new TaskEventRepository(db);
+    const channelRepo = new ChannelRepository(db);
+    const channelUserRepo = new ChannelUserRepository(db);
+    const channelMessageRepo = new ChannelMessageRepository(db);
+
     cronService = new CronService({
       cronEnabled: true,
       storePath: getCronStorePath(),
@@ -202,16 +217,96 @@ app.whenReady().then(async () => {
       },
       createTask: async (params) => {
         const allowUserInput = params.allowUserInput ?? false;
+        const mergedAgentConfig = {
+          ...(params.agentConfig ? params.agentConfig : {}),
+          ...(params.modelKey ? { modelKey: params.modelKey } : {}),
+          allowUserInput,
+        };
         const task = await agentDaemon.createTask({
           title: params.title,
           prompt: params.prompt,
           workspaceId: params.workspaceId,
-          agentConfig: {
-            ...(params.modelKey ? { modelKey: params.modelKey } : {}),
-            allowUserInput,
-          },
+          agentConfig: mergedAgentConfig,
         });
         return { id: task.id };
+      },
+      resolveTemplateVariables: async ({ job, runAtMs, prevRunAtMs }): Promise<Record<string, string>> => {
+        const template = typeof job?.taskPrompt === 'string' ? job.taskPrompt : '';
+        const wantsChatVars =
+          template.includes('{{chat_messages}}') ||
+          template.includes('{{chat_since}}') ||
+          template.includes('{{chat_until}}') ||
+          template.includes('{{chat_message_count}}') ||
+          template.includes('{{chat_truncated}}');
+        if (!wantsChatVars) return {};
+
+        const channelType = job.delivery?.channelType;
+        const chatId = job.delivery?.channelId;
+        if (!channelType || !chatId) return {};
+
+        const channel = channelRepo.findByType(channelType);
+        if (!channel) return {};
+
+        const sevenDaysMs = 7 * 24 * 60 * 60 * 1000;
+        const sinceMs = Math.max(0, Number.isFinite(prevRunAtMs) ? prevRunAtMs! : runAtMs - sevenDaysMs);
+
+        // Fetch a bounded window; formatting further caps message count/size.
+        const raw = channelMessageRepo.findByChatId(channel.id, chatId, 500);
+        const userCache = new Map<string, any>();
+        const lookupUser = (id: string) => {
+          if (!id) return undefined;
+          if (userCache.has(id)) return userCache.get(id);
+          const u = channelUserRepo.findById(id);
+          userCache.set(id, u);
+          return u;
+        };
+
+        const rendered = formatChatTranscriptForPrompt(raw, {
+          lookupUser,
+          sinceMs,
+          untilMs: runAtMs,
+          includeOutgoing: false,
+          dropCommands: true,
+          maxMessages: 120,
+          maxChars: 30_000,
+          maxMessageChars: 500,
+        });
+
+        return {
+          chat_messages: rendered.usedCount > 0 ? rendered.transcript : '[no messages found]',
+          chat_since: new Date(sinceMs).toISOString(),
+          chat_until: new Date(runAtMs).toISOString(),
+          chat_message_count: String(rendered.usedCount),
+          chat_truncated: rendered.truncated ? 'true' : 'false',
+        };
+      },
+      getTaskStatus: async (taskId) => {
+        const task = taskRepo.findById(taskId);
+        if (!task) return null;
+        return {
+          status: task.status,
+          error: task.error ?? null,
+          resultSummary: task.resultSummary ?? null,
+        };
+      },
+      getTaskResultText: async (taskId) => {
+        const task = taskRepo.findById(taskId);
+        const summary = typeof task?.resultSummary === 'string' ? task.resultSummary.trim() : '';
+        if (summary) return summary;
+
+        // Fall back to the last assistant message event (best-effort).
+        const events = taskEventRepo.findByTaskId(taskId);
+        for (let i = events.length - 1; i >= 0; i--) {
+          const evt = events[i];
+          if (evt.type !== 'assistant_message') continue;
+          const payload = evt.payload || {};
+          const text =
+            (typeof payload.message === 'string' ? payload.message : '') ||
+            (typeof payload.content === 'string' ? payload.content : '');
+          const trimmed = text.trim();
+          if (trimmed) return trimmed;
+        }
+        return undefined;
       },
       // Channel delivery handler - sends job results to messaging platforms
       deliverToChannel: async (params) => {
@@ -220,36 +315,33 @@ app.whenReady().then(async () => {
           return;
         }
 
+        const hasResult = params.status === 'ok' && !params.summaryOnly && typeof params.resultText === 'string' && params.resultText.trim().length > 0;
+
         // Build the message
         const statusEmoji = params.status === 'ok' ? '✅' : params.status === 'error' ? '❌' : '⏱️';
-        let message = `${statusEmoji} **Scheduled Task: ${params.jobName}**\n\n`;
+        const message = hasResult
+          ? `**${params.jobName}**\n\n${params.resultText!.trim()}`
+          : (() => {
+            let msg = `${statusEmoji} **Scheduled Task: ${params.jobName}**\n\n`;
 
-        if (params.status === 'ok') {
-          message += `Task completed successfully.\n`;
-        } else if (params.status === 'error') {
-          message += `Task failed.\n`;
-        } else {
-          message += `Task timed out.\n`;
-        }
+            if (params.status === 'ok') {
+              msg += `Task completed successfully.\n`;
+            } else if (params.status === 'error') {
+              msg += `Task failed.\n`;
+            } else {
+              msg += `Task timed out.\n`;
+            }
 
-        if (params.error) {
-          message += `\n**Error:** ${params.error}\n`;
-        }
+            if (params.error) {
+              msg += `\n**Error:** ${params.error}\n`;
+            }
 
-        if (params.taskId && !params.summaryOnly) {
-          message += `\n_Task ID: ${params.taskId}_`;
-        }
+            if (params.taskId && !params.summaryOnly) {
+              msg += `\n_Task ID: ${params.taskId}_`;
+            }
 
-        // Find the channel to verify it exists
-        const channels = channelGateway.getChannels();
-        const channel = channels.find(
-          (ch) => ch.type === params.channelType && ch.id === params.channelId
-        );
-
-        if (!channel) {
-          console.warn(`[Cron] Channel not found: ${params.channelType}:${params.channelId}`);
-          return;
-        }
+            return msg;
+          })();
 
         try {
           // Send the message via the gateway
@@ -417,13 +509,14 @@ app.whenReady().then(async () => {
 
   // Initialize gateway with main window reference
   if (mainWindow) {
+    // Initialize Live Canvas handlers BEFORE async operations so IPC handlers
+    // are registered before the renderer finishes loading and calls them
+    setupCanvasHandlers(mainWindow, agentDaemon);
+    CanvasManager.getInstance().setMainWindow(mainWindow);
+
     await channelGateway.initialize(mainWindow);
     // Initialize update manager with main window reference
     updateManager.setMainWindow(mainWindow);
-
-    // Initialize Live Canvas handlers and set main window reference
-    setupCanvasHandlers(mainWindow, agentDaemon);
-    CanvasManager.getInstance().setMainWindow(mainWindow);
 
     // Restore persisted canvas sessions from disk
     await CanvasManager.getInstance().restoreSessions();
