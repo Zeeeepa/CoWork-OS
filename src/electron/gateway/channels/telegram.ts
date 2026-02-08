@@ -211,8 +211,17 @@ export class TelegramAdapter implements ChannelAdapter {
       await this.registerBotCommands();
 
       // Set up message handler with deduplication and fragment assembly
-      this.bot.on('message:text', async (ctx) => {
-        await this.handleTextMessage(ctx);
+      // Note: we listen to all messages so photo/voice/document attachments can be handled.
+      this.bot.on('message', async (ctx) => {
+        const msg = ctx.message as any;
+        const from = msg?.from;
+        if (!from || from.is_bot) return;
+
+        if (typeof msg.text === 'string' && String(msg.text).length > 0) {
+          await this.handleTextMessage(ctx);
+          return;
+        }
+        await this.handleNonTextMessage(ctx);
       });
 
       // Set up callback query handler for inline keyboards
@@ -471,16 +480,7 @@ export class TelegramAdapter implements ChannelAdapter {
     const msg = ctx.message!;
     const updateId = ctx.update.update_id;
 
-    // Feature 4: Message deduplication - check if already processed
-    if (this.config.deduplicationEnabled && this.isUpdateProcessed(updateId)) {
-      console.log(`Skipping duplicate update ${updateId}`);
-      return;
-    }
-
-    // Mark update as processed
-    if (this.config.deduplicationEnabled) {
-      this.markUpdateProcessed(updateId);
-    }
+    if (!this.shouldProcessUpdate(updateId)) return;
 
     // Feature 3: Text fragment assembly - buffer split messages
     const fragmentKey = `${msg.chat.id}:${msg.from!.id}`;
@@ -529,6 +529,38 @@ export class TelegramAdapter implements ChannelAdapter {
     }
   }
 
+  private shouldProcessUpdate(updateId: number): boolean {
+    if (!this.config.deduplicationEnabled) return true;
+    if (this.isUpdateProcessed(updateId)) {
+      console.log(`Skipping duplicate update ${updateId}`);
+      return false;
+    }
+    this.markUpdateProcessed(updateId);
+    return true;
+  }
+
+  private async handleNonTextMessage(ctx: Context): Promise<void> {
+    const updateId = ctx.update.update_id;
+    if (!this.shouldProcessUpdate(updateId)) return;
+
+    const msg = ctx.message as any;
+    if (!msg) return;
+
+    const hasMedia =
+      (Array.isArray(msg.photo) && msg.photo.length > 0) ||
+      !!msg.document ||
+      !!msg.voice ||
+      !!msg.audio ||
+      !!msg.video ||
+      !!msg.animation ||
+      !!msg.video_note;
+
+    // Ignore non-text messages we do not currently support (joins/leaves/pins/etc).
+    if (!hasMedia) return;
+
+    await this.processMessage(ctx);
+  }
+
   /**
    * Check if a message might be part of a split message
    */
@@ -570,7 +602,7 @@ export class TelegramAdapter implements ChannelAdapter {
 
       // Use the first message's context but with combined text
       const firstCtx = fragment.messages[0].ctx;
-      const message = this.mapContextToMessage(firstCtx, combinedText);
+      const message = await this.mapContextToMessage(firstCtx, combinedText);
 
       console.log(`Assembled ${fragment.messages.length} text fragments into single message (${combinedText.length} chars)`);
 
@@ -582,8 +614,6 @@ export class TelegramAdapter implements ChannelAdapter {
    * Process a single message (with ACK reaction)
    */
   private async processMessage(ctx: Context): Promise<void> {
-    const message = this.mapContextToMessage(ctx);
-
     // Feature 2: Send ACK reaction (👀) while processing
     if (this.config.ackReactionEnabled) {
       try {
@@ -594,6 +624,7 @@ export class TelegramAdapter implements ChannelAdapter {
       }
     }
 
+    const message = await this.mapContextToMessage(ctx);
     await this.handleIncomingMessage(message);
   }
 
@@ -1636,8 +1667,17 @@ export class TelegramAdapter implements ChannelAdapter {
       await this.registerBotCommands();
 
       // Set up message handler
-      this.bot.on('message:text', async (ctx) => {
-        await this.handleTextMessage(ctx);
+      // Note: we listen to all messages so photo/voice/document attachments can be handled.
+      this.bot.on('message', async (ctx) => {
+        const msg = ctx.message as any;
+        const from = msg?.from;
+        if (!from || from.is_bot) return;
+
+        if (typeof msg.text === 'string' && String(msg.text).length > 0) {
+          await this.handleTextMessage(ctx);
+          return;
+        }
+        await this.handleNonTextMessage(ctx);
       });
 
       // Handle errors
@@ -1667,7 +1707,78 @@ export class TelegramAdapter implements ChannelAdapter {
 
   // Private methods
 
-  private mapContextToMessage(ctx: Context, overrideText?: string): IncomingMessage {
+  private inferAttachmentType(mimeType?: string, fileName?: string): MessageAttachment['type'] {
+    const mime = (mimeType || '').toLowerCase();
+    if (mime.startsWith('image/')) return 'image';
+    if (mime.startsWith('audio/')) return 'audio';
+    if (mime.startsWith('video/')) return 'video';
+    if (mime === 'application/pdf') return 'document';
+    const ext = (fileName ? path.extname(fileName) : '').toLowerCase();
+    if (ext === '.pdf') return 'document';
+    return 'file';
+  }
+
+  private async downloadTelegramAttachment(opts: {
+    fileId: string;
+    fileName?: string;
+    mimeType?: string;
+    type?: MessageAttachment['type'];
+  }): Promise<MessageAttachment | null> {
+    if (!this.bot) return null;
+
+    const MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024;
+
+    try {
+      const fileInfo = await this.bot.api.getFile(opts.fileId);
+      const filePath = (fileInfo as any)?.file_path as string | undefined;
+      const declaredSize = (fileInfo as any)?.file_size as number | undefined;
+
+      if (!filePath) return null;
+      if (typeof declaredSize === 'number' && declaredSize > MAX_ATTACHMENT_BYTES) {
+        console.warn('[Telegram] Skipping attachment (too large):', declaredSize, 'bytes');
+        return null;
+      }
+
+      // Download internally (do not leak bot token in URLs to the agent or DB).
+      const url = `https://api.telegram.org/file/bot${this.config.botToken}/${filePath}`;
+
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 30_000);
+      try {
+        const res = await fetch(url, { signal: controller.signal });
+        if (!res.ok) {
+          console.warn('[Telegram] Failed to download attachment:', res.status, res.statusText);
+          return null;
+        }
+
+        const arrayBuffer = await res.arrayBuffer();
+        const buf = Buffer.from(arrayBuffer);
+        if (buf.length > MAX_ATTACHMENT_BYTES) {
+          console.warn('[Telegram] Skipping attachment (download too large):', buf.length, 'bytes');
+          return null;
+        }
+
+        const fileName = (opts.fileName || '').trim() || path.basename(filePath) || `telegram-${opts.fileId}`;
+        const mimeType = (opts.mimeType || '').trim() || undefined;
+        const type = opts.type || this.inferAttachmentType(mimeType, fileName);
+
+        return {
+          type,
+          data: buf,
+          mimeType,
+          fileName,
+          size: buf.length,
+        };
+      } finally {
+        clearTimeout(timeout);
+      }
+    } catch (error) {
+      console.warn('[Telegram] Error downloading attachment:', error);
+      return null;
+    }
+  }
+
+  private async mapContextToMessage(ctx: Context, overrideText?: string): Promise<IncomingMessage> {
     const msg = ctx.message!;
     const from = msg.from!;
     const chat = msg.chat;
@@ -1677,6 +1788,115 @@ export class TelegramAdapter implements ChannelAdapter {
     const threadId = msg.message_thread_id?.toString();
     const isForumTopic = msg.is_topic_message === true || threadId !== undefined;
 
+    const msgAny = msg as any;
+    const attachments: MessageAttachment[] = [];
+
+    const hadMedia =
+      (Array.isArray(msgAny.photo) && msgAny.photo.length > 0) ||
+      !!msgAny.document ||
+      !!msgAny.voice ||
+      !!msgAny.audio ||
+      !!msgAny.video ||
+      !!msgAny.animation ||
+      !!msgAny.video_note;
+
+    // Photo
+    if (Array.isArray(msgAny.photo) && msgAny.photo.length > 0) {
+      // Telegram photo sizes are sorted from smallest to largest.
+      const photo = msgAny.photo[msgAny.photo.length - 1];
+      const fileId = typeof photo?.file_id === 'string' ? photo.file_id : '';
+      if (fileId) {
+        const att = await this.downloadTelegramAttachment({
+          fileId,
+          type: 'image',
+          mimeType: 'image/jpeg',
+        });
+        if (att) attachments.push(att);
+      }
+    }
+
+    // Document
+    if (msgAny.document && typeof msgAny.document.file_id === 'string') {
+      const mimeType = typeof msgAny.document.mime_type === 'string' ? msgAny.document.mime_type : undefined;
+      const fileName = typeof msgAny.document.file_name === 'string' ? msgAny.document.file_name : undefined;
+      const type = this.inferAttachmentType(mimeType, fileName);
+      const att = await this.downloadTelegramAttachment({
+        fileId: msgAny.document.file_id,
+        type,
+        mimeType,
+        fileName,
+      });
+      if (att) attachments.push(att);
+    }
+
+    // Voice note (usually OGG/Opus)
+    if (msgAny.voice && typeof msgAny.voice.file_id === 'string') {
+      const mimeType = typeof msgAny.voice.mime_type === 'string' ? msgAny.voice.mime_type : 'audio/ogg';
+      const fileName = `voice-${msg.message_id}.ogg`;
+      const att = await this.downloadTelegramAttachment({
+        fileId: msgAny.voice.file_id,
+        type: 'audio',
+        mimeType,
+        fileName,
+      });
+      if (att) attachments.push(att);
+    }
+
+    // Audio
+    if (msgAny.audio && typeof msgAny.audio.file_id === 'string') {
+      const mimeType = typeof msgAny.audio.mime_type === 'string' ? msgAny.audio.mime_type : undefined;
+      const fileName = typeof msgAny.audio.file_name === 'string' ? msgAny.audio.file_name : undefined;
+      const att = await this.downloadTelegramAttachment({
+        fileId: msgAny.audio.file_id,
+        type: 'audio',
+        mimeType,
+        fileName,
+      });
+      if (att) attachments.push(att);
+    }
+
+    // Video
+    if (msgAny.video && typeof msgAny.video.file_id === 'string') {
+      const mimeType = typeof msgAny.video.mime_type === 'string' ? msgAny.video.mime_type : 'video/mp4';
+      const fileName = typeof msgAny.video.file_name === 'string' ? msgAny.video.file_name : undefined;
+      const att = await this.downloadTelegramAttachment({
+        fileId: msgAny.video.file_id,
+        type: 'video',
+        mimeType,
+        fileName,
+      });
+      if (att) attachments.push(att);
+    }
+
+    // Animation (GIF / MP4)
+    if (msgAny.animation && typeof msgAny.animation.file_id === 'string') {
+      const mimeType = typeof msgAny.animation.mime_type === 'string' ? msgAny.animation.mime_type : undefined;
+      const fileName = typeof msgAny.animation.file_name === 'string' ? msgAny.animation.file_name : undefined;
+      const type = this.inferAttachmentType(mimeType, fileName);
+      const att = await this.downloadTelegramAttachment({
+        fileId: msgAny.animation.file_id,
+        type,
+        mimeType,
+        fileName,
+      });
+      if (att) attachments.push(att);
+    }
+
+    // Video note
+    if (msgAny.video_note && typeof msgAny.video_note.file_id === 'string') {
+      const att = await this.downloadTelegramAttachment({
+        fileId: msgAny.video_note.file_id,
+        type: 'video',
+        mimeType: 'video/mp4',
+        fileName: `video-note-${msg.message_id}.mp4`,
+      });
+      if (att) attachments.push(att);
+    }
+
+    const caption = typeof msgAny.caption === 'string' ? msgAny.caption : '';
+    const baseText = overrideText ?? msg.text ?? caption ?? '';
+    const finalText = String(baseText || '').trim() || (hadMedia ? '<attachment>' : '');
+
     return {
       messageId: msg.message_id.toString(),
       channel: 'telegram',
@@ -1684,11 +1904,12 @@ export class TelegramAdapter implements ChannelAdapter {
       userName: from.first_name + (from.last_name ? ` ${from.last_name}` : ''),
       chatId: chat.id.toString(),
       isGroup,
-      text: overrideText ?? msg.text ?? '',
+      text: finalText,
       timestamp: new Date(msg.date * 1000),
       replyTo: msg.reply_to_message?.message_id.toString(),
       threadId,
       isForumTopic,
+      ...(attachments.length > 0 ? { attachments } : {}),
       raw: ctx,
     };
   }

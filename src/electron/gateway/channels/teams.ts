@@ -27,6 +27,7 @@ import {
   StatusHandler,
   ChannelInfo,
   TeamsConfig,
+  MessageAttachment,
 } from './types';
 
 /**
@@ -265,11 +266,6 @@ export class TeamsAdapter implements ChannelAdapter {
    * Handle incoming message activity
    */
   private async handleMessage(context: TurnContext, activity: Activity): Promise<void> {
-    // Skip if no text content
-    if (!activity.text) {
-      return;
-    }
-
     // Deduplication check
     const messageId = activity.id || `${activity.conversation.id}-${activity.timestamp}`;
     if (this.config.deduplicationEnabled !== false && this.deduplicationCache.has(messageId)) {
@@ -278,8 +274,10 @@ export class TeamsAdapter implements ChannelAdapter {
     }
     this.deduplicationCache.add(messageId);
 
-    // Remove bot mention from text
-    let text = activity.text;
+    const attachments = await this.extractAttachments(activity);
+
+    // Remove bot mention from text (if any)
+    let text = activity.text || '';
     if (activity.entities) {
       for (const entity of activity.entities) {
         if (entity.type === 'mention' && entity.mentioned?.id === activity.recipient?.id) {
@@ -290,7 +288,12 @@ export class TeamsAdapter implements ChannelAdapter {
       }
     }
 
-    // Skip empty messages after removing mentions
+    // Allow attachment-only messages
+    if (!text.trim() && attachments.length > 0) {
+      text = '<attachment>';
+    }
+
+    // Skip empty messages after removing mentions (and no attachments)
     if (!text.trim()) {
       return;
     }
@@ -314,11 +317,121 @@ export class TeamsAdapter implements ChannelAdapter {
       timestamp: activity.timestamp ? new Date(activity.timestamp) : new Date(),
       replyTo: activity.replyToId,
       threadId: activity.conversation.id,
+      attachments: attachments.length > 0 ? attachments : undefined,
       raw: activity,
     };
 
     console.log(`Processing Teams message from ${userName}: ${text.slice(0, 50)}...`);
     await this.handleIncomingMessage(incomingMessage);
+  }
+
+  private getAttachmentTypeFromMime(mimeType?: string): MessageAttachment['type'] {
+    const mime = (mimeType || '').toLowerCase();
+    if (mime.startsWith('image/')) return 'image';
+    if (mime.startsWith('audio/')) return 'audio';
+    if (mime.startsWith('video/')) return 'video';
+    if (mime.startsWith('application/')) return 'document';
+    return 'file';
+  }
+
+  private getAttachmentTypeFromFilename(fileName?: string): MessageAttachment['type'] {
+    const lower = (fileName || '').toLowerCase();
+    if (lower.match(/\.(png|jpe?g|gif|webp|bmp|tiff?)$/)) return 'image';
+    if (lower.match(/\.(mp3|wav|ogg|m4a|aac|flac)$/)) return 'audio';
+    if (lower.match(/\.(mp4|mov|mkv|webm|avi)$/)) return 'video';
+    if (lower.match(/\.(pdf|docx?|xlsx?|pptx?|txt|md|rtf|csv)$/)) return 'document';
+    return 'file';
+  }
+
+  private async downloadToBuffer(url: string, maxBytes = 25 * 1024 * 1024): Promise<{ data: Buffer; mimeType?: string } | null> {
+    if (!url.startsWith('https://') && !url.startsWith('http://')) return null;
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 30_000);
+    try {
+      const res = await fetch(url, { signal: controller.signal });
+      if (!res.ok) return null;
+
+      const contentLength = res.headers.get('content-length');
+      if (contentLength) {
+        const len = Number(contentLength);
+        if (!isNaN(len) && len > maxBytes) return null;
+      }
+
+      const arrayBuffer = await res.arrayBuffer();
+      const buf = Buffer.from(arrayBuffer);
+      if (buf.length > maxBytes) return null;
+
+      return { data: buf, mimeType: res.headers.get('content-type') || undefined };
+    } catch {
+      return null;
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+
+  private async extractAttachments(activity: Activity): Promise<MessageAttachment[]> {
+    const raw = Array.isArray(activity.attachments) ? activity.attachments : [];
+    if (raw.length === 0) return [];
+
+    const out: MessageAttachment[] = [];
+
+    for (const att of raw) {
+      const contentType = typeof att?.contentType === 'string' ? att.contentType : undefined;
+      const name = typeof att?.name === 'string' ? att.name : undefined;
+
+      // Teams file attachments often arrive as "application/vnd.microsoft.teams.file.download.info"
+      const downloadUrl =
+        (contentType === 'application/vnd.microsoft.teams.file.download.info' && typeof (att as any)?.content?.downloadUrl === 'string'
+          ? (att as any).content.downloadUrl
+          : undefined) ||
+        (typeof (att as any)?.contentUrl === 'string' ? (att as any).contentUrl : undefined) ||
+        (typeof (att as any)?.thumbnailUrl === 'string' ? (att as any).thumbnailUrl : undefined);
+
+      // Best-effort file name inference
+      const inferredName = (() => {
+        if (name && name.trim()) return name.trim();
+        const fileType = typeof (att as any)?.content?.fileType === 'string' ? (att as any).content.fileType.trim() : '';
+        const uniqueId = typeof (att as any)?.content?.uniqueId === 'string' ? (att as any).content.uniqueId.trim() : '';
+        if (uniqueId && fileType) return `${uniqueId}.${fileType}`;
+        if (downloadUrl) {
+          try {
+            const u = new URL(downloadUrl);
+            const base = path.basename(u.pathname);
+            if (base && base !== '/' && base !== '.') return base;
+          } catch {
+            // ignore
+          }
+        }
+        return undefined;
+      })();
+
+      const baseType = this.getAttachmentTypeFromMime(contentType);
+      const type = inferredName ? this.getAttachmentTypeFromFilename(inferredName) : baseType;
+
+      if (downloadUrl) {
+        // Prefer downloading within the adapter to avoid auth-protected URLs leaking into prompts.
+        const downloaded = await this.downloadToBuffer(downloadUrl);
+        if (downloaded) {
+          out.push({
+            type,
+            data: downloaded.data,
+            mimeType: contentType || downloaded.mimeType,
+            fileName: inferredName,
+          });
+          continue;
+        }
+
+        out.push({
+          type,
+          url: downloadUrl,
+          mimeType: contentType,
+          fileName: inferredName,
+        });
+      }
+    }
+
+    return out;
   }
 
   /**

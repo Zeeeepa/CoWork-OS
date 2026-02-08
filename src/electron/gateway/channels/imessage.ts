@@ -24,6 +24,7 @@ import {
   StatusHandler,
   ChannelInfo,
   ImessageConfig,
+  MessageAttachment,
 } from './types';
 import {
   ImessageRpcClient,
@@ -331,6 +332,7 @@ export class ImessageAdapter implements ChannelAdapter {
     const messageId = payload.id ? String(payload.id) : undefined;
     const text = payload.text?.trim() || '';
     const chatId = payload.chat_id;
+    const isGroup = payload.is_group === true;
 
     // Skip empty messages (unless they have attachments)
     if (!text && (!payload.attachments || payload.attachments.length === 0)) {
@@ -353,6 +355,8 @@ export class ImessageAdapter implements ChannelAdapter {
       ? formatImessageChatTarget(chatId) || `imessage:${normalizedSender}`
       : `imessage:${normalizedSender}`;
 
+    const attachments: MessageAttachment[] | undefined = this.buildAttachments(payload);
+
     // Create incoming message
     const incomingMessage: IncomingMessage = {
       messageId: messageId || `imessage-${Date.now()}`,
@@ -360,8 +364,10 @@ export class ImessageAdapter implements ChannelAdapter {
       userId: normalizedSender,
       userName: normalizedSender,
       chatId: chatTarget,
+      isGroup,
       text: text || '<attachment>',
       timestamp: payload.created_at ? new Date(payload.created_at) : new Date(),
+      ...(attachments && attachments.length > 0 ? { attachments } : {}),
       raw: payload,
     };
 
@@ -385,6 +391,56 @@ export class ImessageAdapter implements ChannelAdapter {
    */
   private getDefaultDbPath(): string {
     return path.join(os.homedir(), 'Library', 'Messages', 'chat.db');
+  }
+
+  private resolveUserPath(inputPath: string): string {
+    const p = String(inputPath || '').trim();
+    if (p.startsWith('~')) {
+      return path.join(os.homedir(), p.slice(1));
+    }
+    return p;
+  }
+
+  private inferAttachmentType(mimeType?: string, fileName?: string): MessageAttachment['type'] {
+    const mime = (mimeType || '').toLowerCase();
+    if (mime.startsWith('image/')) return 'image';
+    if (mime.startsWith('audio/')) return 'audio';
+    if (mime.startsWith('video/')) return 'video';
+    if (mime === 'application/pdf') return 'document';
+    const ext = (fileName ? path.extname(fileName) : '').toLowerCase();
+    if (ext === '.pdf') return 'document';
+    return 'file';
+  }
+
+  private buildAttachments(payload: ImessagePayload): MessageAttachment[] | undefined {
+    if (!Array.isArray(payload.attachments) || payload.attachments.length === 0) return undefined;
+
+    const out: MessageAttachment[] = [];
+
+    for (const att of payload.attachments) {
+      if (!att || att.missing) continue;
+
+      const originalPathRaw = typeof att.original_path === 'string' ? att.original_path.trim() : '';
+      if (!originalPathRaw) continue;
+
+      const isFileUrl = originalPathRaw.startsWith('file://');
+      const pathPart = isFileUrl ? originalPathRaw.replace('file://', '') : originalPathRaw;
+      const resolved = this.resolveUserPath(pathPart);
+      const url = isFileUrl ? `file://${resolved}` : resolved;
+
+      const mimeType = typeof att.mime_type === 'string' ? att.mime_type.trim() : undefined;
+      const fileName = path.basename(resolved);
+      const type = this.inferAttachmentType(mimeType, fileName);
+
+      out.push({
+        type,
+        url,
+        mimeType,
+        fileName,
+      });
+    }
+
+    return out.length > 0 ? out : undefined;
   }
 
   /**

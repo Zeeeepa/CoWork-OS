@@ -63,15 +63,15 @@ export class EmailAdapter implements ChannelAdapter {
 
   constructor(config: EmailConfig) {
     this.config = {
-      imapPort: 993,
-      imapSecure: true,
-      smtpPort: 587,
-      smtpSecure: false,
-      mailbox: 'INBOX',
-      pollInterval: 30000,
-      markAsRead: true,
-      deduplicationEnabled: true,
       ...config,
+      imapPort: config.imapPort ?? 993,
+      imapSecure: config.imapSecure ?? true,
+      smtpPort: config.smtpPort ?? 587,
+      smtpSecure: config.smtpSecure ?? false,
+      mailbox: config.mailbox ?? 'INBOX',
+      pollInterval: config.pollInterval ?? 30000,
+      markAsRead: config.markAsRead ?? true,
+      deduplicationEnabled: config.deduplicationEnabled ?? true,
     };
   }
 

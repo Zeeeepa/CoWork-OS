@@ -41,6 +41,7 @@ import {
   StatusHandler,
   ChannelInfo,
   DiscordConfig,
+  MessageAttachment,
   CallbackQuery,
   CallbackQueryHandler,
   InlineKeyboardButton,
@@ -993,6 +994,49 @@ export class DiscordAdapter implements ChannelAdapter {
 
   // Private methods
 
+  private inferAttachmentType(mimeType?: string, fileName?: string): MessageAttachment['type'] {
+    const mime = (mimeType || '').toLowerCase();
+    if (mime.startsWith('image/')) return 'image';
+    if (mime.startsWith('audio/')) return 'audio';
+    if (mime.startsWith('video/')) return 'video';
+    if (mime === 'application/pdf') return 'document';
+
+    const ext = (fileName ? path.extname(fileName) : '').toLowerCase();
+    if (['.png', '.jpg', '.jpeg', '.webp', '.gif', '.bmp'].includes(ext)) return 'image';
+    if (['.mp3', '.wav', '.ogg', '.m4a', '.flac'].includes(ext)) return 'audio';
+    if (['.mp4', '.mov', '.webm', '.mkv'].includes(ext)) return 'video';
+    if (ext === '.pdf') return 'document';
+
+    return 'file';
+  }
+
+  private extractAttachments(message: Message): MessageAttachment[] | undefined {
+    if (!message.attachments || message.attachments.size === 0) return undefined;
+
+    const out: MessageAttachment[] = [];
+    for (const att of message.attachments.values()) {
+      const url = typeof (att as any)?.url === 'string' ? String((att as any).url).trim() : '';
+      if (!url) continue;
+
+      const fileName = typeof (att as any)?.name === 'string' ? (att as any).name : undefined;
+      const mimeType =
+        typeof (att as any)?.contentType === 'string' && (att as any).contentType.trim().length > 0
+          ? (att as any).contentType.trim()
+          : undefined;
+      const size = typeof (att as any)?.size === 'number' ? (att as any).size : undefined;
+
+      out.push({
+        type: this.inferAttachmentType(mimeType, fileName),
+        url,
+        mimeType,
+        fileName,
+        size,
+      });
+    }
+
+    return out.length > 0 ? out : undefined;
+  }
+
   private isTextBasedChannel(channel: unknown): channel is TextChannel | DMChannel | ThreadChannel {
     const ch = channel as { type?: DiscordChannelType };
     return ch.type === DiscordChannelType.GuildText ||
@@ -1015,6 +1059,8 @@ export class DiscordAdapter implements ChannelAdapter {
     const isThread = message.channel.isThread();
     const threadId = isThread ? message.channelId : undefined;
     const isGroup = message.channel.type !== DiscordChannelType.DM;
+    const attachments = this.extractAttachments(message);
+    const finalText = (commandText || text || '').trim() || (attachments && attachments.length > 0 ? '<attachment>' : '');
 
     return {
       messageId: message.id,
@@ -1023,11 +1069,12 @@ export class DiscordAdapter implements ChannelAdapter {
       userName: message.author.displayName || message.author.username,
       chatId: isThread ? (message.channel as ThreadChannel).parentId! : message.channelId,
       isGroup,
-      text: commandText || text,
+      text: finalText,
       timestamp: message.createdAt,
       replyTo: message.reference?.messageId,
       threadId,
       isForumTopic: isThread,
+      ...(attachments && attachments.length > 0 ? { attachments } : {}),
       raw: message,
     };
   }

@@ -24,6 +24,7 @@ import {
   StatusHandler,
   ChannelInfo,
   GoogleChatConfig,
+  MessageAttachment,
 } from './types';
 
 /**
@@ -441,12 +442,6 @@ export class GoogleChatAdapter implements ChannelAdapter {
       return;
     }
 
-    // Get message text (use argumentText for @mentions, otherwise use text)
-    const text = message.argumentText?.trim() || message.text?.trim();
-    if (!text) {
-      return;
-    }
-
     // Extract message ID from name (format: spaces/{space}/messages/{message})
     const messageId = message.name.split('/').pop() || message.name;
 
@@ -456,6 +451,18 @@ export class GoogleChatAdapter implements ChannelAdapter {
       return;
     }
     this.deduplicationCache.add(messageId);
+
+    // Get message text (use argumentText for @mentions, otherwise use text)
+    let text = message.argumentText?.trim() || message.text?.trim() || '';
+    const hasMedia = Array.isArray(message.attachment) && message.attachment.length > 0;
+
+    // Allow attachment-only messages
+    if (!text && hasMedia) {
+      text = '<attachment>';
+    }
+    if (!text) return;
+
+    const attachments = hasMedia ? await this.extractAttachments(message) : [];
 
     // Extract space ID (format: spaces/{space})
     const spaceId = message.space.name;
@@ -477,11 +484,107 @@ export class GoogleChatAdapter implements ChannelAdapter {
       text: text,
       timestamp: message.createTime ? new Date(message.createTime) : new Date(),
       threadId: message.thread?.name,
+      attachments: attachments.length > 0 ? attachments : undefined,
       raw: event,
     };
 
     console.log(`Processing Google Chat message from ${userName}: ${text.slice(0, 50)}...`);
     await this.handleIncomingMessage(incomingMessage);
+  }
+
+  private getAttachmentTypeFromMime(mimeType?: string): MessageAttachment['type'] {
+    const mime = (mimeType || '').toLowerCase();
+    if (mime.startsWith('image/')) return 'image';
+    if (mime.startsWith('audio/')) return 'audio';
+    if (mime.startsWith('video/')) return 'video';
+    if (mime.startsWith('application/')) return 'document';
+    return 'file';
+  }
+
+  private getAttachmentTypeFromFilename(fileName?: string): MessageAttachment['type'] {
+    const lower = (fileName || '').toLowerCase();
+    if (lower.match(/\.(png|jpe?g|gif|webp|bmp|tiff?)$/)) return 'image';
+    if (lower.match(/\.(mp3|wav|ogg|m4a|aac|flac)$/)) return 'audio';
+    if (lower.match(/\.(mp4|mov|mkv|webm|avi)$/)) return 'video';
+    if (lower.match(/\.(pdf|docx?|xlsx?|pptx?|txt|md|rtf|csv)$/)) return 'document';
+    return 'file';
+  }
+
+  private async downloadToBuffer(
+    url: string,
+    accessToken: string,
+    maxBytes = 25 * 1024 * 1024
+  ): Promise<{ data: Buffer; mimeType?: string } | null> {
+    if (!url.startsWith('https://') && !url.startsWith('http://')) return null;
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 30_000);
+    try {
+      const res = await fetch(url, {
+        signal: controller.signal,
+        headers: {
+          'Authorization': `Bearer ${accessToken}`,
+        },
+      });
+      if (!res.ok) return null;
+
+      const contentLength = res.headers.get('content-length');
+      if (contentLength) {
+        const len = Number(contentLength);
+        if (!isNaN(len) && len > maxBytes) return null;
+      }
+
+      const arrayBuffer = await res.arrayBuffer();
+      const buf = Buffer.from(arrayBuffer);
+      if (buf.length > maxBytes) return null;
+
+      return { data: buf, mimeType: res.headers.get('content-type') || undefined };
+    } catch {
+      return null;
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+
+  private async extractAttachments(message: GoogleChatMessage): Promise<MessageAttachment[]> {
+    const raw = Array.isArray(message.attachment) ? message.attachment : [];
+    if (raw.length === 0) return [];
+
+    const accessToken = this.authManager ? await this.authManager.getAccessToken().catch(() => null) : null;
+    const out: MessageAttachment[] = [];
+
+    for (const att of raw) {
+      const fileName = typeof att?.contentName === 'string' && att.contentName.trim().length > 0 ? att.contentName.trim() : undefined;
+      const mimeType = typeof att?.contentType === 'string' && att.contentType.trim().length > 0 ? att.contentType.trim() : undefined;
+      const url =
+        (typeof att?.downloadUri === 'string' && att.downloadUri.trim().length > 0 ? att.downloadUri.trim() : undefined) ||
+        (typeof att?.thumbnailUri === 'string' && att.thumbnailUri.trim().length > 0 ? att.thumbnailUri.trim() : undefined);
+
+      const baseType = this.getAttachmentTypeFromMime(mimeType);
+      const type = fileName ? this.getAttachmentTypeFromFilename(fileName) : baseType;
+
+      if (url && accessToken) {
+        const downloaded = await this.downloadToBuffer(url, accessToken);
+        if (downloaded) {
+          out.push({
+            type,
+            data: downloaded.data,
+            mimeType: mimeType || downloaded.mimeType,
+            fileName,
+          });
+          continue;
+        }
+      }
+
+      out.push({
+        type,
+        url,
+        mimeType,
+        fileName,
+      });
+    }
+
+    return out;
   }
 
   /**

@@ -25,6 +25,58 @@
 import { EventEmitter } from 'events';
 import * as tls from 'tls';
 import * as net from 'net';
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
+import { execFileSync } from 'child_process';
+
+/**
+ * Load CA certificates from the macOS system keychain so that TLS connections
+ * trust locally-installed CAs (e.g. corporate proxies, antivirus TLS inspection).
+ * Combined with Node's built-in root certificates for full coverage.
+ */
+let _cachedSystemCA: string[] | undefined;
+
+function readKeychainCerts(keychains: string[]): string[] {
+  const existing = keychains.filter((k) => fs.existsSync(k));
+  if (existing.length === 0) return [];
+  try {
+    const pem = execFileSync('security', ['find-certificate', '-a', '-p', ...existing], {
+      encoding: 'utf-8',
+      timeout: 8000,
+    });
+    return pem
+      .split(/(?=-----BEGIN CERTIFICATE-----)/)
+      .filter((c) => c.includes('BEGIN CERTIFICATE'));
+  } catch {
+    return [];
+  }
+}
+
+function getSystemCA(): string[] {
+  if (_cachedSystemCA) return _cachedSystemCA;
+
+  // System keychains (always present on macOS).
+  const systemKeychains = [
+    '/Library/Keychains/System.keychain',
+    '/System/Library/Keychains/SystemRootCertificates.keychain',
+  ];
+
+  // User keychains (some enterprise tools install trusted roots here).
+  const home = os.homedir();
+  const userKeychains = [
+    path.join(home, 'Library', 'Keychains', 'login.keychain-db'),
+    path.join(home, 'Library', 'Keychains', 'login.keychain'),
+  ];
+
+  const certs = [
+    ...readKeychainCerts(systemKeychains),
+    ...readKeychainCerts(userKeychains),
+  ];
+
+  _cachedSystemCA = [...tls.rootCertificates, ...certs];
+  return _cachedSystemCA;
+}
 
 /**
  * Email message
@@ -121,7 +173,9 @@ export class EmailClient extends EventEmitter {
   private pollTimer?: NodeJS.Timeout;
   private lastSeenUid = 0;
   private commandTag = 0;
-  private currentCallback?: (response: string) => void;
+  // For this simplified IMAP client we allow one in-flight command at a time.
+  // currentCallback returns true when the buffered response is complete.
+  private currentCallback?: (buffer: string) => boolean;
   private responseBuffer = '';
 
   constructor(options: EmailClientOptions) {
@@ -174,9 +228,12 @@ export class EmailClient extends EventEmitter {
     return new Promise((resolve, reject) => {
       const connect = () => {
         if (this.options.imapSecure) {
+          const servername = net.isIP(this.options.imapHost) ? undefined : this.options.imapHost;
           this.imapSocket = tls.connect({
             host: this.options.imapHost,
             port: this.options.imapPort,
+            servername,
+            ca: getSystemCA(),
             rejectUnauthorized: true,
           });
         } else {
@@ -200,11 +257,11 @@ export class EmailClient extends EventEmitter {
         });
 
         this.imapSocket.once('connect', async () => {
-          // Wait for server greeting
-          await this.waitForResponse('OK');
-
-          // Login
           try {
+            // Wait for server greeting
+            await this.waitForResponse('OK');
+
+            // Login
             await this.imapCommand(`LOGIN "${this.options.email}" "${this.options.password}"`);
             clearTimeout(timeout);
             resolve();
@@ -231,19 +288,12 @@ export class EmailClient extends EventEmitter {
   private handleImapData(data: string): void {
     this.responseBuffer += data;
 
-    if (this.currentCallback) {
-      // Check for complete response
-      if (
-        this.responseBuffer.includes('\r\n') &&
-        (this.responseBuffer.includes('OK') ||
-          this.responseBuffer.includes('NO') ||
-          this.responseBuffer.includes('BAD'))
-      ) {
-        const response = this.responseBuffer;
-        this.responseBuffer = '';
-        this.currentCallback(response);
-        this.currentCallback = undefined;
-      }
+    if (!this.currentCallback) return;
+
+    const done = this.currentCallback(this.responseBuffer);
+    if (done) {
+      this.responseBuffer = '';
+      this.currentCallback = undefined;
     }
   }
 
@@ -254,19 +304,34 @@ export class EmailClient extends EventEmitter {
     return new Promise((resolve, reject) => {
       const timeout = setTimeout(() => {
         this.currentCallback = undefined;
+        this.responseBuffer = '';
         reject(new Error('IMAP response timeout'));
       }, 10000);
 
-      this.currentCallback = (response) => {
-        clearTimeout(timeout);
-        if (response.includes(expectedType)) {
-          resolve(response);
-        } else if (response.includes('NO') || response.includes('BAD')) {
-          reject(new Error(`IMAP error: ${response}`));
-        } else {
-          resolve(response);
+      const cb = (buffer: string): boolean => {
+        if (buffer.includes(expectedType)) {
+          clearTimeout(timeout);
+          resolve(buffer);
+          return true;
         }
+        if (buffer.includes('NO') || buffer.includes('BAD')) {
+          clearTimeout(timeout);
+          reject(new Error(`IMAP error: ${buffer}`));
+          return true;
+        }
+        return false;
       };
+
+      this.currentCallback = cb;
+
+      // Handle the case where the server greeting arrives before we start waiting.
+      if (this.responseBuffer) {
+        const done = cb(this.responseBuffer);
+        if (done) {
+          this.responseBuffer = '';
+          this.currentCallback = undefined;
+        }
+      }
     });
   }
 
@@ -285,18 +350,25 @@ export class EmailClient extends EventEmitter {
 
       const timeout = setTimeout(() => {
         this.currentCallback = undefined;
+        this.responseBuffer = '';
         reject(new Error('IMAP command timeout'));
       }, 30000);
 
-      this.currentCallback = (response) => {
-        clearTimeout(timeout);
-        if (response.includes(`${tag} OK`)) {
-          resolve(response);
-        } else if (response.includes(`${tag} NO`) || response.includes(`${tag} BAD`)) {
-          reject(new Error(`IMAP error: ${response}`));
-        } else {
-          // Partial response, keep waiting
+      // Clear any leftover buffered data before issuing a new command.
+      this.responseBuffer = '';
+
+      this.currentCallback = (buffer: string): boolean => {
+        if (buffer.includes(`${tag} OK`)) {
+          clearTimeout(timeout);
+          resolve(buffer);
+          return true;
         }
+        if (buffer.includes(`${tag} NO`) || buffer.includes(`${tag} BAD`)) {
+          clearTimeout(timeout);
+          reject(new Error(`IMAP error: ${buffer}`));
+          return true;
+        }
+        return false;
       };
 
       this.imapSocket.write(fullCommand);
@@ -380,7 +452,9 @@ export class EmailClient extends EventEmitter {
   private async fetchEmail(uid: number): Promise<EmailMessage | null> {
     try {
       const response = await this.imapCommand(
-        `UID FETCH ${uid} (FLAGS BODY[HEADER] BODY[TEXT])`
+        // Use BODY.PEEK so reading does not implicitly set \\Seen.
+        // Mark-as-read is handled explicitly (see EmailAdapter + markAsRead config).
+        `UID FETCH ${uid} (FLAGS BODY.PEEK[HEADER] BODY.PEEK[TEXT])`
       );
 
       // Parse email from response (simplified)
@@ -391,6 +465,44 @@ export class EmailClient extends EventEmitter {
         console.error(`Error fetching email ${uid}:`, error);
       }
       return null;
+    }
+  }
+
+  /**
+   * Fetch unread emails from the mailbox without modifying read state.
+   * Intended for inbox summarization and diagnostics (not the gateway ingestion loop).
+   */
+  async fetchUnreadEmails(limit: number): Promise<EmailMessage[]> {
+    const safeLimit = Math.min(Math.max(Number.isFinite(limit) ? limit : 20, 1), 50);
+
+    await this.connectImap();
+    try {
+      await this.selectMailbox();
+
+      const response = await this.imapCommand('UID SEARCH UNSEEN');
+      const uidMatch = response.match(/SEARCH\s+([\d\s]+)/i);
+      const uids = uidMatch
+        ? uidMatch[1]
+            .trim()
+            .split(/\s+/)
+            .filter((u) => u)
+            .map((u) => parseInt(u, 10))
+            .filter((u) => Number.isFinite(u))
+        : [];
+
+      if (uids.length === 0) return [];
+
+      // Return newest-first (best-effort; UIDs generally increase over time).
+      const selected = uids.slice(-safeLimit).reverse();
+
+      const emails: EmailMessage[] = [];
+      for (const uid of selected) {
+        const email = await this.fetchEmail(uid);
+        if (email) emails.push(email);
+      }
+      return emails;
+    } finally {
+      await this.disconnectImap();
     }
   }
 
@@ -580,9 +692,12 @@ export class EmailClient extends EventEmitter {
         let socket: net.Socket | tls.TLSSocket;
 
         if (this.options.smtpSecure) {
+          const servername = net.isIP(this.options.smtpHost) ? undefined : this.options.smtpHost;
           socket = tls.connect({
             host: this.options.smtpHost,
             port: this.options.smtpPort,
+            servername,
+            ca: getSystemCA(),
             rejectUnauthorized: true,
           });
         } else {
@@ -637,9 +752,12 @@ export class EmailClient extends EventEmitter {
               case 3: // After STARTTLS or AUTH
                 if (line.includes('220') && !this.options.smtpSecure) {
                   // Upgrade to TLS
+                  const servername = net.isIP(this.options.smtpHost) ? undefined : this.options.smtpHost;
                   const tlsSocket = tls.connect({
                     socket: socket as net.Socket,
                     host: this.options.smtpHost,
+                    servername,
+                    ca: getSystemCA(),
                     rejectUnauthorized: true,
                   });
                   socket = tlsSocket;

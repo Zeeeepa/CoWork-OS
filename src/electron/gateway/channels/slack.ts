@@ -18,6 +18,7 @@ import {
   StatusHandler,
   ChannelInfo,
   SlackConfig,
+  MessageAttachment,
 } from './types';
 
 export class SlackAdapter implements ChannelAdapter {
@@ -75,8 +76,11 @@ export class SlackAdapter implements ChannelAdapter {
           return;
         }
 
-        // Only process messages with text
-        if (!('text' in message) || !message.text) {
+        const hasText = typeof (message as any)?.text === 'string' && String((message as any).text).trim().length > 0;
+        const hasFiles = Array.isArray((message as any)?.files) && (message as any).files.length > 0;
+
+        // Only process messages with some content
+        if (!hasText && !hasFiles) {
           return;
         }
 
@@ -85,7 +89,7 @@ export class SlackAdapter implements ChannelAdapter {
         const isDirect = channelInfo.channel?.is_im === true;
         const isMultiPartyDm = channelInfo.channel?.is_mpim === true;
         const isGroup = isDirect ? false : true;
-        const isMentioned = message.text.includes(`<@${this._botId}>`);
+        const isMentioned = hasText && this._botId ? String((message as any).text).includes(`<@${this._botId}>`) : false;
 
         if (isDirect || isMultiPartyDm || isMentioned) {
           const incomingMessage = await this.mapMessageToIncoming(message, client, isGroup);
@@ -367,7 +371,79 @@ export class SlackAdapter implements ChannelAdapter {
 
   // Private methods
 
+  private inferAttachmentType(mimeType?: string, fileName?: string): MessageAttachment['type'] {
+    const mime = (mimeType || '').toLowerCase();
+    if (mime.startsWith('image/')) return 'image';
+    if (mime.startsWith('audio/')) return 'audio';
+    if (mime.startsWith('video/')) return 'video';
+    if (mime === 'application/pdf') return 'document';
+    const ext = (fileName ? path.extname(fileName) : '').toLowerCase();
+    if (ext === '.pdf') return 'document';
+    return 'file';
+  }
+
+  private async downloadSlackAttachment(file: any): Promise<MessageAttachment | null> {
+    const url: string = String(file?.url_private_download || file?.url_private || '').trim();
+    if (!url) return null;
+
+    const fileName: string = String(file?.name || file?.title || path.basename(url) || 'attachment').trim();
+    const mimeType: string | undefined =
+      typeof file?.mimetype === 'string' && file.mimetype.trim().length > 0 ? file.mimetype.trim() : undefined;
+
+    const size: number | undefined = typeof file?.size === 'number' ? file.size : undefined;
+    const MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024;
+    if (typeof size === 'number' && size > MAX_ATTACHMENT_BYTES) {
+      console.warn('[Slack] Skipping attachment (too large):', size, 'bytes', fileName);
+      return null;
+    }
+
+    try {
+      const res = await fetch(url, {
+        headers: {
+          Authorization: `Bearer ${this.config.botToken}`,
+        },
+      });
+      if (!res.ok) {
+        console.warn('[Slack] Failed to download attachment:', res.status, res.statusText, fileName);
+        return null;
+      }
+
+      const arrayBuffer = await res.arrayBuffer();
+      const buf = Buffer.from(arrayBuffer);
+      if (buf.length > MAX_ATTACHMENT_BYTES) {
+        console.warn('[Slack] Skipping attachment (download too large):', buf.length, 'bytes', fileName);
+        return null;
+      }
+
+      return {
+        type: this.inferAttachmentType(mimeType, fileName),
+        data: buf,
+        mimeType,
+        fileName,
+        size: buf.length,
+      };
+    } catch (error) {
+      console.warn('[Slack] Error downloading attachment:', fileName, error);
+      return null;
+    }
+  }
+
+  private async buildAttachments(message: any): Promise<MessageAttachment[] | undefined> {
+    const files = Array.isArray(message?.files) ? message.files : [];
+    if (files.length === 0) return undefined;
+
+    const out: MessageAttachment[] = [];
+    for (const file of files) {
+      const att = await this.downloadSlackAttachment(file);
+      if (att) out.push(att);
+    }
+
+    return out.length > 0 ? out : undefined;
+  }
+
   private async mapMessageToIncoming(message: any, client: any, isGroup?: boolean): Promise<IncomingMessage> {
+    const hadFiles = Array.isArray(message?.files) && message.files.length > 0;
+
     // Remove bot mention from the text if present
     let text = message.text || '';
     if (this._botId) {
@@ -387,6 +463,8 @@ export class SlackAdapter implements ChannelAdapter {
 
     // Map Slack message to command format if it looks like a command
     const commandText = this.parseCommand(text);
+    const attachments = await this.buildAttachments(message);
+    const finalText = (commandText || text || '').trim() || (hadFiles ? '<attachment>' : '');
 
     return {
       messageId: message.ts || '',
@@ -395,9 +473,10 @@ export class SlackAdapter implements ChannelAdapter {
       userName,
       chatId: message.channel || '',
       isGroup,
-      text: commandText || text,
+      text: finalText,
       timestamp: new Date(parseFloat(message.ts || '0') * 1000),
       replyTo: message.thread_ts,
+      ...(attachments && attachments.length > 0 ? { attachments } : {}),
       raw: message,
     };
   }
