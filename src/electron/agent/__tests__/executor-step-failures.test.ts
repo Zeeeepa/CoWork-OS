@@ -66,7 +66,19 @@ function createExecutorWithStubs(responses: LLMResponse[], toolResults: Record<s
     permissions: { read: true, write: true, delete: true, network: true, shell: true },
   };
   executor.daemon = { logEvent: vi.fn() };
-  executor.contextManager = { compactMessages: vi.fn((messages: any) => messages) };
+  executor.contextManager = {
+    compactMessagesWithMeta: vi.fn((messages: any) => ({
+      messages,
+      meta: {
+        availableTokens: 1_000_000,
+        originalTokens: 0,
+        truncatedToolResults: { didTruncate: false, count: 0, tokensAfter: 0 },
+        removedMessages: { didRemove: false, count: 0, tokensAfter: 0, messages: [] },
+        kind: 'none',
+      },
+    })),
+    getAvailableTokens: vi.fn().mockReturnValue(1_000_000),
+  };
   executor.checkBudgets = vi.fn();
   executor.updateTracking = vi.fn();
   executor.getAvailableTools = vi.fn().mockReturnValue([
@@ -133,7 +145,19 @@ function createExecutorWithLLMHandler(
     permissions: { read: true, write: true, delete: true, network: true, shell: true },
   };
   executor.daemon = { logEvent: vi.fn() };
-  executor.contextManager = { compactMessages: vi.fn((messages: any) => messages) };
+  executor.contextManager = {
+    compactMessagesWithMeta: vi.fn((messages: any) => ({
+      messages,
+      meta: {
+        availableTokens: 1_000_000,
+        originalTokens: 0,
+        truncatedToolResults: { didTruncate: false, count: 0, tokensAfter: 0 },
+        removedMessages: { didRemove: false, count: 0, tokensAfter: 0, messages: [] },
+        kind: 'none',
+      },
+    })),
+    getAvailableTokens: vi.fn().mockReturnValue(1_000_000),
+  };
   executor.checkBudgets = vi.fn();
   executor.updateTracking = vi.fn();
   executor.getAvailableTools = vi.fn().mockReturnValue([]);

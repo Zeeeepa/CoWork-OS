@@ -502,29 +502,22 @@ export class MemoryService {
 
     // Search for relevant memories based on task prompt
     let relevantMemories: MemorySearchResult[] = [];
-    let relevantImported: MemorySearchResult[] = [];
     if (taskPrompt && taskPrompt.length > 10) {
       try {
-        // Extract key terms for search
-        const searchTerms = this.extractSearchTerms(taskPrompt);
-        if (searchTerms) {
-          relevantMemories = this.memoryRepo.search(workspaceId, searchTerms, 5, true);
-          // Imported ChatGPT history is global across workspaces.
-          relevantImported = this.memoryRepo.searchImportedGlobal(searchTerms, 5, true);
-          // Filter out memories that are already in recent
-          const recentIds = new Set(recentMemories.map((m) => m.id));
-          relevantMemories = relevantMemories.filter((m) => !recentIds.has(m.id));
-          relevantImported = relevantImported.filter((m) => !recentIds.has(m.id));
-          // Also filter imported vs local duplicates.
-          const localIds = new Set(relevantMemories.map((m) => m.id));
-          relevantImported = relevantImported.filter((m) => !localIds.has(m.id));
-        }
+        // Hybrid recall: use local embeddings + lexical search for better matches.
+        // Keep the query bounded for performance.
+        const query = taskPrompt.slice(0, 2500);
+        relevantMemories = this.search(workspaceId, query, 10);
+
+        // Filter out memories that are already in recent
+        const recentIds = new Set(recentMemories.map((m) => m.id));
+        relevantMemories = relevantMemories.filter((m) => !recentIds.has(m.id)).slice(0, 7);
       } catch {
         // Search failed, continue without relevant memories
       }
     }
 
-    if (recentMemories.length === 0 && relevantMemories.length === 0 && relevantImported.length === 0) {
+    if (recentMemories.length === 0 && relevantMemories.length === 0) {
       return '';
     }
 
@@ -543,21 +536,12 @@ export class MemoryService {
       }
     }
 
-    // Add relevant memories
+    // Add relevant memories (hybrid semantic + lexical)
     if (relevantMemories.length > 0) {
-      parts.push('\n## Relevant to Current Task');
+      parts.push('\n## Relevant to Current Task (Hybrid Recall)');
       for (const result of relevantMemories) {
         const date = new Date(result.createdAt).toLocaleDateString();
         // Sanitize memory content to prevent injection via stored memories
-        const sanitizedSnippet = InputSanitizer.sanitizeMemoryContent(result.snippet);
-        parts.push(`- [${result.type}] (${date}) ${sanitizedSnippet}`);
-      }
-    }
-
-    if (relevantImported.length > 0) {
-      parts.push('\n## Imported ChatGPT History (Global)');
-      for (const result of relevantImported) {
-        const date = new Date(result.createdAt).toLocaleDateString();
         const sanitizedSnippet = InputSanitizer.sanitizeMemoryContent(result.snippet);
         parts.push(`- [${result.type}] (${date}) ${sanitizedSnippet}`);
       }
