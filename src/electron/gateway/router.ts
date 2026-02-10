@@ -51,6 +51,7 @@ import {
 } from '../../shared/channelMessages';
 import { DEFAULT_QUIRKS } from '../../shared/types';
 import { formatChatTranscriptForPrompt } from './chat-transcript';
+import { evaluateWorkspaceRouterRules } from './router-rules';
 
 export interface RouterConfig {
   /** Default workspace ID to use for new sessions */
@@ -1255,6 +1256,59 @@ export class MessageRouter {
       // No workspace match found - auto-assign temp workspace so tasks can proceed
       const tempWorkspace = this.getOrCreateTempWorkspace();
       this.sessionManager.setSessionWorkspace(sessionId, tempWorkspace.id);
+    }
+
+    // Optional workspace-local router rules (.cowork/router/rules.monty)
+    // Runs before forwarding to the agent (regular messages only).
+    try {
+      const freshSession = this.sessionRepo.findById(sessionId);
+      const ws = freshSession?.workspaceId ? this.workspaceRepo.findById(freshSession.workspaceId) : null;
+      if (ws) {
+        const ruleResult = await evaluateWorkspaceRouterRules({
+          workspace: ws,
+          channelType: adapter.type,
+          sessionId,
+          message,
+          contextType: securityContext?.contextType ?? (message.isGroup ? 'group' : 'dm'),
+          taskId: freshSession?.taskId ?? null,
+        });
+
+        if (ruleResult) {
+          if (ruleResult.action === 'ignore') {
+            return;
+          }
+          if (ruleResult.action === 'reply') {
+            await adapter.sendMessage({
+              chatId: message.chatId,
+              text: ruleResult.text,
+              parseMode: ruleResult.parseMode,
+              replyTo: message.messageId,
+            });
+            return;
+          }
+          if (ruleResult.action === 'rewrite') {
+            message.text = ruleResult.text;
+          }
+          if (ruleResult.action === 'set_workspace') {
+            const nextWs = this.workspaceRepo.findById(ruleResult.workspaceId);
+            if (nextWs) {
+              this.sessionManager.setSessionWorkspace(sessionId, nextWs.id);
+              if (nextWs.id !== TEMP_WORKSPACE_ID) {
+                try {
+                  this.workspaceRepo.updateLastUsedAt(nextWs.id);
+                } catch (error) {
+                  console.warn('Failed to update workspace last used time:', error);
+                }
+              }
+              if (typeof ruleResult.text === 'string' && ruleResult.text.trim().length > 0) {
+                message.text = ruleResult.text;
+              }
+            }
+          }
+        }
+      }
+    } catch (error) {
+      console.warn('[RouterRules] Failed to evaluate rules.monty:', error);
     }
 
     // Regular message - send to desktop app for task processing

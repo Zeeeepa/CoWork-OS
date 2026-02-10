@@ -3852,6 +3852,85 @@ function setupKitHandlers(workspaceRepo: WorkspaceRepository): void {
           `- Store secrets in env vars; do not commit them\n`,
       },
       {
+        relPath: path.join(kitDirName, 'transforms', 'README.md'),
+        content:
+          `# Monty Transforms\n\n` +
+          `Drop \`.monty\` scripts in this folder to create deterministic, reusable transforms.\n\n` +
+          `Tools:\n` +
+          `- monty_list_transforms: list available transforms\n` +
+          `- monty_run_transform: run a transform with an input object\n` +
+          `- monty_transform_file: apply a transform to a file and write output without returning full file contents to the LLM\n\n` +
+          `Conventions:\n` +
+          `- Your input object is available as \`input\` (a dict)\n` +
+          `- The value of the last expression is returned\n\n` +
+          `Example:\n` +
+          `\`\`\`\n` +
+          `# name: Uppercase\n` +
+          `# description: Convert input['text'] to uppercase\n` +
+          `input['text'].upper()\n` +
+          `\`\`\`\n`,
+      },
+      {
+        relPath: path.join(kitDirName, 'transforms', 'uppercase.monty'),
+        content:
+          `# name: Uppercase\n` +
+          `# description: Convert input['text'] to uppercase\n\n` +
+          `text = input.get('text') or ''\n` +
+          `text.upper()\n`,
+      },
+      {
+        relPath: path.join(kitDirName, 'router', 'README.md'),
+        content:
+          `# Gateway Router Rules (Optional)\n\n` +
+          `You can add a workspace-local message triage script at:\n` +
+          `- \`.cowork/router/rules.monty\`\n\n` +
+          `This runs before a message is forwarded to the agent (regular messages only, not slash commands).\n` +
+          `It can be used to:\n` +
+          `- ignore low-signal messages (\"ok\", \"thanks\")\n` +
+          `- auto-reply with deterministic responses\n` +
+          `- rewrite/normalize messages before creating a task\n` +
+          `- switch workspace for a session\n\n` +
+          `Return a dict as the last expression:\n` +
+          `- {\"action\": \"pass\"}\n` +
+          `- {\"action\": \"ignore\"}\n` +
+          `- {\"action\": \"reply\", \"text\": \"...\"}\n` +
+          `- {\"action\": \"rewrite\", \"text\": \"...\"}\n` +
+          `- {\"action\": \"set_workspace\", \"workspaceId\": \"...\", \"text\": \"optional rewrite\"}\n`,
+      },
+      {
+        relPath: path.join(kitDirName, 'router', 'rules.monty'),
+        content:
+          `# Workspace-local gateway router rules\n` +
+          `# Input is available as \`input\`.\n` +
+          `# Return a dict as the last expression.\n\n` +
+          `# Default: do nothing\n` +
+          `{\"action\": \"pass\"}\n`,
+      },
+      {
+        relPath: path.join(kitDirName, 'policy', 'README.md'),
+        content:
+          `# Tool Policy Hook (Optional)\n\n` +
+          `You can add a workspace-local tool policy script at:\n` +
+          `- \`.cowork/policy/tools.monty\`\n\n` +
+          `This runs before each tool call.\n\n` +
+          `Input is available as \`input\` and includes:\n` +
+          `- input['tool'] (tool name)\n` +
+          `- input['params'] (tool input object)\n` +
+          `- input['workspace'] (id/name/path/permissions)\n` +
+          `- input['gatewayContext'] (\"private\" | \"group\" | \"public\" | null)\n\n` +
+          `Return a dict as the last expression:\n` +
+          `- {\"decision\": \"pass\"}\n` +
+          `- {\"decision\": \"deny\", \"reason\": \"...\"}\n` +
+          `- {\"decision\": \"require_approval\", \"reason\": \"...\"}\n`,
+      },
+      {
+        relPath: path.join(kitDirName, 'policy', 'tools.monty'),
+        content:
+          `# Workspace-local tool policy hook\n` +
+          `# Default: allow.\n` +
+          `{\"decision\": \"pass\"}\n`,
+      },
+      {
         relPath: path.join(kitDirName, 'MEMORY.md'),
         content:
           `# Long-Term Memory\n\n` +
@@ -3968,6 +4047,9 @@ function setupKitHandlers(workspaceRepo: WorkspaceRepository): void {
     await ensureDir(workspacePath, path.join(kitDirName, 'projects'));
     await ensureDir(workspacePath, path.join(kitDirName, 'agents'));
     await ensureDir(workspacePath, path.join(kitDirName, 'uploads'));
+    await ensureDir(workspacePath, path.join(kitDirName, 'transforms'));
+    await ensureDir(workspacePath, path.join(kitDirName, 'router'));
+    await ensureDir(workspacePath, path.join(kitDirName, 'policy'));
 
     const now = new Date();
     const templates = templatesForInit(now);

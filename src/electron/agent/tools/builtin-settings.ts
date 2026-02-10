@@ -117,6 +117,11 @@ const TOOL_CATEGORIES: Record<string, keyof BuiltinToolsSettings['categories']> 
   glob: 'code',
   grep: 'code',
   edit_file: 'code',
+  monty_run: 'code',
+  monty_list_transforms: 'code',
+  monty_run_transform: 'code',
+  monty_transform_file: 'code',
+  extract_json: 'code',
   // Web fetch tools (high priority)
   web_fetch: 'webfetch',
   notion_action: 'webfetch',

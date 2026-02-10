@@ -230,6 +230,10 @@ export const TOOL_GROUPS = {
     'system_info',
     'get_env',
     'get_app_paths',
+    // Monty transform library (workspace-local scripts)
+    'monty_list_transforms',
+    'monty_run_transform',
+    'monty_transform_file',
     // Local gateway message history
     'channel_list_chats',
     'channel_history',
@@ -246,6 +250,8 @@ export const TOOL_GROUPS = {
     'edit_document',
     'create_presentation',
     'organize_folder',
+    // Monty transform library can write transformed outputs
+    'monty_transform_file',
   ],
   // Destructive operations - high risk, requires approval
   'group:destructive': [

@@ -10,6 +10,7 @@ import { WebFetchTools } from './web-fetch-tools';
 import { GlobTools } from './glob-tools';
 import { GrepTools } from './grep-tools';
 import { EditTools } from './edit-tools';
+import { MontyTools } from './monty-tools';
 import { BrowserTools } from './browser-tools';
 import { ShellTools } from './shell-tools';
 import { ImageTools } from './image-tools';
@@ -38,6 +39,7 @@ import { SearchProviderFactory } from '../search';
 import { MCPClientManager } from '../../mcp/client/MCPClientManager';
 import { MCPSettingsManager } from '../../mcp/settings';
 import { isToolAllowedQuick } from '../../security/policy-manager';
+import { evaluateMontyToolPolicy } from '../../security/monty-tool-policy';
 import { BuiltinToolsSettingsManager } from './builtin-settings';
 import { getCustomSkillLoader } from '../custom-skill-loader';
 import { PersonalityManager } from '../../settings/personality-manager';
@@ -56,6 +58,7 @@ export class ToolRegistry {
   private globTools: GlobTools;
   private grepTools: GrepTools;
   private editTools: EditTools;
+  private montyTools: MontyTools;
   private browserTools: BrowserTools;
   private shellTools: ShellTools;
   private imageTools: ImageTools;
@@ -97,6 +100,7 @@ export class ToolRegistry {
     this.globTools = new GlobTools(workspace, daemon, taskId);
     this.grepTools = new GrepTools(workspace, daemon, taskId);
     this.editTools = new EditTools(workspace, daemon, taskId);
+    this.montyTools = new MontyTools(workspace, daemon, taskId, this.fileTools);
     this.browserTools = new BrowserTools(workspace, daemon, taskId);
     this.shellTools = new ShellTools(workspace, daemon, taskId);
     this.imageTools = new ImageTools(workspace, daemon, taskId);
@@ -173,6 +177,7 @@ export class ToolRegistry {
     this.globTools.setWorkspace(workspace);
     this.grepTools.setWorkspace(workspace);
     this.editTools.setWorkspace(workspace);
+    this.montyTools.setWorkspace(workspace);
     this.browserTools.setWorkspace(workspace);
     this.shellTools.setWorkspace(workspace);
     this.imageTools.setWorkspace(workspace);
@@ -262,6 +267,7 @@ export class ToolRegistry {
       ...GlobTools.getToolDefinitions(),
       ...GrepTools.getToolDefinitions(),
       ...EditTools.getToolDefinitions(),
+      ...MontyTools.getToolDefinitions(),
       ...WebFetchTools.getToolDefinitions(),
       ...BrowserTools.getToolDefinitions(),
     ];
@@ -699,6 +705,10 @@ Code Tools (PREFERRED for code navigation and editing):
   Use this FIRST for searching file contents - supports full regex.
 - edit_file: Surgical text replacement in files (old_string -> new_string)
   Use this INSTEAD of write_file for targeted changes - safer and preserves structure.
+- monty_run: Deterministic, sandboxed Python-subset compute for post-processing tool results.
+- monty_list_transforms / monty_run_transform: Run workspace-local transforms from .cowork/transforms/.
+- monty_transform_file: Apply a transform to a file and write output without returning full file contents to the LLM.
+- extract_json: Extract and parse JSON from messy text (prose + code fences).
 
 Web Fetch (PREFERRED for reading web content):
 - web_fetch: Fetch and read content from a URL as markdown (fast, lightweight, no browser needed)
@@ -831,6 +841,52 @@ ${skillDescriptions}`;
    * Execute a tool by name
    */
   async executeTool(name: string, input: any): Promise<any> {
+    // Optional workspace-local policy hook (.cowork/policy/tools.monty).
+    // Fail-open on policy script errors to avoid bricking tool execution.
+    try {
+      const policy = await evaluateMontyToolPolicy({
+        workspace: this.workspace,
+        toolName: name,
+        toolInput: input,
+        gatewayContext: this.gatewayContext,
+      });
+
+      if (policy.decision === 'deny') {
+        const reason = policy.reason ? `: ${policy.reason}` : '';
+        throw new Error(`Tool "${name}" blocked by workspace policy${reason}`);
+      }
+
+      // Avoid double-prompts for tools that already enforce approvals internally.
+      const selfGated = name === 'run_command' || name === 'delete_file';
+      if (policy.decision === 'require_approval' && !selfGated) {
+        const requester = (this.daemon as any)?.requestApproval;
+        if (typeof requester !== 'function') {
+          throw new Error(`Tool "${name}" requires approval, but approval system is unavailable in this context`);
+        }
+        const approved = await requester.call(
+          this.daemon,
+          this.taskId,
+          'external_service',
+          `Approve tool call: ${name}`,
+          {
+            tool: name,
+            params: input ?? null,
+            reason: policy.reason || null,
+          }
+        );
+        if (!approved) {
+          const reason = policy.reason ? `: ${policy.reason}` : '';
+          throw new Error(`Tool "${name}" approval denied${reason}`);
+        }
+      }
+    } catch (err) {
+      // Only block if the policy explicitly denied or required approval and was not approved.
+      const msg = String((err as any)?.message || '');
+      if (/blocked by workspace policy|approval denied|requires approval/i.test(msg)) {
+        throw err;
+      }
+    }
+
     // File tools
     if (name === 'read_file') return await this.fileTools.readFile(input.path);
     if (name === 'read_files') return await readFilesByPatterns(input, { globTools: this.globTools, fileTools: this.fileTools });
@@ -864,6 +920,11 @@ ${skillDescriptions}`;
     if (name === 'glob') return await this.globTools.glob(input);
     if (name === 'grep') return await this.grepTools.grep(input);
     if (name === 'edit_file') return await this.editTools.editFile(input);
+    if (name === 'monty_run') return await this.montyTools.montyRun(input);
+    if (name === 'monty_list_transforms') return await this.montyTools.listTransforms(input);
+    if (name === 'monty_run_transform') return await this.montyTools.runTransform(input);
+    if (name === 'monty_transform_file') return await this.montyTools.transformFile(input);
+    if (name === 'extract_json') return await this.montyTools.extractJson(input);
 
     // Web fetch tools (preferred for reading web content)
     if (name === 'web_fetch') return await this.webFetchTools.webFetch(input);

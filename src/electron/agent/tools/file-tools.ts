@@ -184,6 +184,82 @@ export class FileTools {
   }
 
   /**
+   * Read a plain-text file for local processing (does not append truncation markers).
+   *
+   * Intended for internal tools that do NOT return the raw content back to the LLM,
+   * allowing a higher size ceiling than `read_file` without blowing up the context.
+   */
+  async readTextFileRaw(
+    relativePath: string,
+    options?: { maxBytes?: number }
+  ): Promise<{ content: string; size: number; truncated: boolean }> {
+    if (!relativePath || typeof relativePath !== 'string') {
+      throw new Error('Invalid path: path must be a non-empty string');
+    }
+
+    const maxBytes =
+      typeof options?.maxBytes === 'number' && Number.isFinite(options.maxBytes)
+        ? Math.max(1, Math.min(10_000_000, options.maxBytes))
+        : 1_000_000;
+
+    const binaryExtensions = ['.docx', '.xlsx', '.pptx', '.pdf', '.zip', '.png', '.jpg', '.jpeg', '.gif', '.mp3', '.mp4', '.exe', '.dmg'];
+
+    this.checkPermission('read');
+    let fullPath = this.resolvePath(relativePath, 'read');
+    let ext = path.extname(fullPath).toLowerCase();
+
+    if (binaryExtensions.includes(ext)) {
+      throw new Error(`readTextFileRaw does not support binary file type "${ext}". Use read_file instead.`);
+    }
+
+    try {
+      await this.enforceProjectAccess(fullPath);
+      let stats: any;
+      try {
+        stats = await fs.stat(fullPath);
+      } catch (error: any) {
+        if (this.isNotFoundError(error) && !path.isAbsolute(relativePath)) {
+          const fallbackPath = await this.resolveCaseInsensitivePath(relativePath);
+          if (fallbackPath && fallbackPath !== fullPath) {
+            fullPath = fallbackPath;
+            ext = path.extname(fullPath).toLowerCase();
+            if (binaryExtensions.includes(ext)) {
+              throw new Error(`readTextFileRaw does not support binary file type "${ext}". Use read_file instead.`);
+            }
+            await this.enforceProjectAccess(fullPath);
+            stats = await fs.stat(fullPath);
+          } else {
+            throw error;
+          }
+        } else {
+          throw error;
+        }
+      }
+
+      if (!stats?.isFile?.()) {
+        throw new Error('Path is not a file');
+      }
+
+      if (stats.size <= maxBytes) {
+        const content = await fs.readFile(fullPath, 'utf8');
+        return { content, size: stats.size, truncated: false };
+      }
+
+      const fileHandle = await fs.open(fullPath, 'r');
+      try {
+        const buffer = Buffer.alloc(maxBytes);
+        const readRes = await fileHandle.read(buffer, 0, maxBytes, 0);
+        const content = buffer.toString('utf8', 0, readRes.bytesRead);
+        return { content, size: stats.size, truncated: true };
+      } finally {
+        await fileHandle.close();
+      }
+    } catch (error: any) {
+      throw new Error(`Failed to read file: ${error.message}`);
+    }
+  }
+
+  /**
    * Read file contents (with size limit to prevent context overflow)
    * Supports plain text, DOCX, and PDF files
    */
