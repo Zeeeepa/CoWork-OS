@@ -4,7 +4,10 @@
  * IPC handlers for managing the WebSocket control plane from the renderer.
  */
 
-import { ipcMain, BrowserWindow } from 'electron';
+import { app, ipcMain, BrowserWindow } from 'electron';
+import { randomUUID } from 'crypto';
+import * as fs from 'fs/promises';
+import path from 'path';
 import { IPC_CHANNELS, TEMP_WORKSPACE_ID } from '../../shared/types';
 import type {
   ControlPlaneSettingsData,
@@ -21,7 +24,10 @@ import { Methods, Events, ErrorCodes } from './protocol';
 import type { AgentConfig } from '../../shared/types';
 import type { AgentDaemon } from '../agent/daemon';
 import type { DatabaseManager } from '../database/schema';
-import { TaskRepository, WorkspaceRepository } from '../database/repositories';
+import type { ChannelGateway } from '../gateway';
+import { ApprovalRepository, TaskEventRepository, TaskRepository, WorkspaceRepository } from '../database/repositories';
+import { LLMProviderFactory } from '../agent/llm';
+import { SearchProviderFactory } from '../agent/search';
 import { checkTailscaleAvailability, getExposureStatus } from '../tailscale';
 import { TailscaleSettingsManager } from '../tailscale/settings';
 import {
@@ -36,6 +42,8 @@ import {
   getSSHTunnelManager,
   shutdownSSHTunnelManager,
 } from './ssh-tunnel';
+import { getEnvSettingsImportModeFromArgsOrEnv, isHeadlessMode, shouldImportEnvSettingsFromArgsOrEnv } from '../utils/runtime-mode';
+import { getUserDataDir } from '../utils/user-data-dir';
 
 // Server instance
 let controlPlaneServer: ControlPlaneServer | null = null;
@@ -46,6 +54,7 @@ let mainWindowRef: BrowserWindow | null = null;
 export interface ControlPlaneMethodDeps {
   agentDaemon: AgentDaemon;
   dbManager: DatabaseManager;
+  channelGateway?: ChannelGateway;
 }
 
 let controlPlaneDeps: ControlPlaneMethodDeps | null = null;
@@ -120,6 +129,15 @@ function sanitizeTaskMessageParams(params: unknown): { taskId: string; message: 
   return { taskId, message };
 }
 
+function sanitizeApprovalRespondParams(params: unknown): { approvalId: string; approved: boolean } {
+  const p = (params ?? {}) as any;
+  const approvalId = typeof p.approvalId === 'string' ? p.approvalId.trim() : '';
+  const approved = p.approved;
+  if (!approvalId) throw { code: ErrorCodes.INVALID_PARAMS, message: 'approvalId is required' };
+  if (typeof approved !== 'boolean') throw { code: ErrorCodes.INVALID_PARAMS, message: 'approved is required (boolean)' };
+  return { approvalId, approved };
+}
+
 function sanitizeTaskListParams(params: unknown): { limit: number; offset: number; workspaceId?: string } {
   const p = (params ?? {}) as any;
   const rawLimit = typeof p.limit === 'number' && Number.isFinite(p.limit) ? Math.floor(p.limit) : 100;
@@ -130,11 +148,153 @@ function sanitizeTaskListParams(params: unknown): { limit: number; offset: numbe
   return { limit, offset, ...(workspaceId ? { workspaceId } : {}) };
 }
 
+function sanitizeApprovalListParams(params: unknown): { limit: number; offset: number; taskId?: string } {
+  const p = (params ?? {}) as any;
+  const rawLimit = typeof p.limit === 'number' && Number.isFinite(p.limit) ? Math.floor(p.limit) : 100;
+  const rawOffset = typeof p.offset === 'number' && Number.isFinite(p.offset) ? Math.floor(p.offset) : 0;
+  const limit = Math.min(Math.max(rawLimit, 1), 500);
+  const offset = Math.max(rawOffset, 0);
+  const taskId = typeof p.taskId === 'string' ? p.taskId.trim() : '';
+  return { limit, offset, ...(taskId ? { taskId } : {}) };
+}
+
+function sanitizeTaskEventsParams(params: unknown): { taskId: string; limit: number } {
+  const p = (params ?? {}) as any;
+  const { taskId } = sanitizeTaskIdParams(params);
+  const rawLimit = typeof p.limit === 'number' && Number.isFinite(p.limit) ? Math.floor(p.limit) : 200;
+  const limit = Math.min(Math.max(rawLimit, 1), 2000);
+  return { taskId, limit };
+}
+
 function sanitizeWorkspaceIdParams(params: unknown): { workspaceId: string } {
   const p = (params ?? {}) as any;
   const workspaceId = typeof p.workspaceId === 'string' ? p.workspaceId.trim() : '';
   if (!workspaceId) throw { code: ErrorCodes.INVALID_PARAMS, message: 'workspaceId is required' };
   return { workspaceId };
+}
+
+function sanitizeWorkspaceCreateParams(params: unknown): { name: string; path: string } {
+  const p = (params ?? {}) as any;
+  const name = typeof p.name === 'string' ? p.name.trim() : '';
+  const rawPath = typeof p.path === 'string' ? p.path.trim() : '';
+  if (!name) throw { code: ErrorCodes.INVALID_PARAMS, message: 'name is required' };
+  if (!rawPath) throw { code: ErrorCodes.INVALID_PARAMS, message: 'path is required' };
+
+  const expanded = rawPath.startsWith('~/') && process.env.HOME
+    ? path.join(process.env.HOME, rawPath.slice(2))
+    : rawPath;
+  if (!path.isAbsolute(expanded)) {
+    throw { code: ErrorCodes.INVALID_PARAMS, message: 'path must be an absolute path (or start with ~/)' };
+  }
+
+  return { name, path: path.resolve(expanded) };
+}
+
+function sanitizeChannelIdParams(params: unknown): { channelId: string } {
+  const p = (params ?? {}) as any;
+  const channelId = typeof p.channelId === 'string' ? p.channelId.trim() : '';
+  if (!channelId) throw { code: ErrorCodes.INVALID_PARAMS, message: 'channelId is required' };
+  return { channelId };
+}
+
+function sanitizeChannelCreateParams(params: unknown): {
+  type: string;
+  name: string;
+  enabled: boolean;
+  config: Record<string, unknown>;
+  securityConfig: Record<string, unknown>;
+} {
+  const p = (params ?? {}) as any;
+  const type = typeof p.type === 'string' ? p.type.trim() : '';
+  const name = typeof p.name === 'string' ? p.name.trim() : '';
+  const enabled = typeof p.enabled === 'boolean' ? p.enabled : false;
+  const config = p.config && typeof p.config === 'object' ? (p.config as Record<string, unknown>) : {};
+  const securityConfigRaw = p.securityConfig && typeof p.securityConfig === 'object'
+    ? (p.securityConfig as Record<string, unknown>)
+    : {};
+
+  if (!type) throw { code: ErrorCodes.INVALID_PARAMS, message: 'type is required' };
+  if (!name) throw { code: ErrorCodes.INVALID_PARAMS, message: 'name is required' };
+
+  // Provide safe defaults for security config if not specified.
+  const defaults = {
+    mode: 'pairing',
+    pairingCodeTTL: 300,
+    maxPairingAttempts: 5,
+    rateLimitPerMinute: 30,
+  };
+
+  const mode = typeof securityConfigRaw.mode === 'string' ? securityConfigRaw.mode : undefined;
+  const normalizedMode = mode === 'open' || mode === 'allowlist' || mode === 'pairing' ? mode : defaults.mode;
+  const allowedUsers = Array.isArray(securityConfigRaw.allowedUsers)
+    ? securityConfigRaw.allowedUsers.filter((x) => typeof x === 'string')
+    : undefined;
+
+  const securityConfig = {
+    ...defaults,
+    ...securityConfigRaw,
+    mode: normalizedMode,
+    ...(allowedUsers ? { allowedUsers } : {}),
+  };
+
+  return { type, name, enabled, config, securityConfig };
+}
+
+function sanitizeChannelUpdateParams(params: unknown): {
+  channelId: string;
+  updates: { name?: string; config?: Record<string, unknown>; securityConfig?: Record<string, unknown> };
+} {
+  const p = (params ?? {}) as any;
+  const channelId = typeof p.channelId === 'string' ? p.channelId.trim() : '';
+  if (!channelId) throw { code: ErrorCodes.INVALID_PARAMS, message: 'channelId is required' };
+
+  const updates: any = {};
+  if (p.name !== undefined) {
+    const name = typeof p.name === 'string' ? p.name.trim() : '';
+    if (!name) throw { code: ErrorCodes.INVALID_PARAMS, message: 'name must be a non-empty string' };
+    updates.name = name;
+  }
+  if (p.config !== undefined) {
+    if (!p.config || typeof p.config !== 'object') {
+      throw { code: ErrorCodes.INVALID_PARAMS, message: 'config must be an object' };
+    }
+    updates.config = p.config as Record<string, unknown>;
+  }
+  if (p.securityConfig !== undefined) {
+    if (!p.securityConfig || typeof p.securityConfig !== 'object') {
+      throw { code: ErrorCodes.INVALID_PARAMS, message: 'securityConfig must be an object' };
+    }
+    updates.securityConfig = p.securityConfig as Record<string, unknown>;
+  }
+
+  return { channelId, updates };
+}
+
+function maskSecretString(value: string): string {
+  const trimmed = value.trim();
+  if (!trimmed) return '';
+  if (trimmed.length <= 8) return '[redacted]';
+  return `${trimmed.slice(0, 2)}...${trimmed.slice(-4)}`;
+}
+
+function redactObjectSecrets(input: unknown, depth = 0): unknown {
+  if (depth > 8) return '[truncated]';
+  if (input === null || input === undefined) return input;
+  if (typeof input === 'string') return input;
+  if (typeof input !== 'object') return input;
+  if (Array.isArray(input)) return input.map((x) => redactObjectSecrets(x, depth + 1));
+
+  const obj = input as Record<string, unknown>;
+  const out: Record<string, unknown> = {};
+  const secretKeyRe = /(token|secret|password|apiKey|accessKey|privateKey|signing|oauth)/i;
+  for (const [k, v] of Object.entries(obj)) {
+    if (secretKeyRe.test(k) && typeof v === 'string') {
+      out[k] = maskSecretString(v);
+      continue;
+    }
+    out[k] = redactObjectSecrets(v, depth + 1);
+  }
+  return out;
 }
 
 const MAX_BROADCAST_STRING_CHARS = 2000;
@@ -303,11 +463,144 @@ function attachAgentDaemonTaskBridge(server: ControlPlaneServer, daemon: AgentDa
   };
 }
 
+export async function startControlPlaneFromSettings(options: {
+  deps?: ControlPlaneMethodDeps;
+  forceEnable?: boolean;
+  onEvent?: (event: any) => void;
+} = {}): Promise<{
+  ok: boolean;
+  skipped?: boolean;
+  address?: { host: string; port: number; wsUrl: string };
+  tailscale?: { httpsUrl?: string; wssUrl?: string };
+  error?: string;
+}> {
+  try {
+    ControlPlaneSettingsManager.initialize();
+    TailscaleSettingsManager.initialize();
+
+    if (options.deps) {
+      controlPlaneDeps = options.deps;
+    }
+
+    const settings = options.forceEnable
+      ? ControlPlaneSettingsManager.enable()
+      : ControlPlaneSettingsManager.loadSettings();
+
+    if (!settings.enabled) {
+      return { ok: true, skipped: true };
+    }
+
+    if (settings.connectionMode === 'remote') {
+      const remoteConfig = settings.remote;
+      if (!remoteConfig?.url || !remoteConfig?.token) {
+        return { ok: false, error: 'Remote gateway URL and token are required (connectionMode=remote)' };
+      }
+
+      // Stop local server if running
+      if (controlPlaneServer?.isRunning) {
+        if (detachAgentDaemonBridge) {
+          detachAgentDaemonBridge();
+          detachAgentDaemonBridge = null;
+        }
+        await controlPlaneServer.stop();
+        controlPlaneServer = null;
+      }
+
+      const client = initRemoteGatewayClient({
+        ...remoteConfig,
+        onStateChange: () => {},
+        onEvent: () => {},
+      });
+
+      await client.connect();
+      return { ok: true };
+    }
+
+    if (!settings.token) {
+      return { ok: false, error: 'No authentication token configured' };
+    }
+
+    if (controlPlaneServer?.isRunning) {
+      const addr = controlPlaneServer.getAddress();
+      const tailscale = getExposureStatus();
+      return {
+        ok: true,
+        address: addr || undefined,
+        tailscale: tailscale.active ? { httpsUrl: tailscale.httpsUrl, wssUrl: tailscale.wssUrl } : undefined,
+      };
+    }
+
+    // Cleanup a previous failed/partial server instance.
+    if (controlPlaneServer && !controlPlaneServer.isRunning) {
+      if (detachAgentDaemonBridge) {
+        detachAgentDaemonBridge();
+        detachAgentDaemonBridge = null;
+      }
+      controlPlaneServer = null;
+    }
+
+    const server = new ControlPlaneServer({
+      port: settings.port,
+      host: settings.host,
+      token: settings.token,
+      handshakeTimeoutMs: settings.handshakeTimeoutMs,
+      heartbeatIntervalMs: settings.heartbeatIntervalMs,
+      maxPayloadBytes: settings.maxPayloadBytes,
+      onEvent: (event) => {
+        options.onEvent?.(event);
+        if (mainWindowRef && !mainWindowRef.isDestroyed()) {
+          mainWindowRef.webContents.send(IPC_CHANNELS.CONTROL_PLANE_EVENT, event);
+        }
+      },
+    });
+
+    controlPlaneServer = server;
+
+    try {
+      if (controlPlaneDeps) {
+        registerTaskAndWorkspaceMethods(server, controlPlaneDeps);
+        detachAgentDaemonBridge = attachAgentDaemonTaskBridge(server, controlPlaneDeps.agentDaemon);
+      } else {
+        console.warn('[ControlPlane] No deps provided; task/workspace methods are disabled');
+      }
+
+      const tailscaleResult = await server.startWithTailscale();
+      const address = server.getAddress();
+
+      return {
+        ok: true,
+        address: address || undefined,
+        tailscale: tailscaleResult?.success ? { httpsUrl: tailscaleResult.httpsUrl, wssUrl: tailscaleResult.wssUrl } : undefined,
+      };
+    } catch (error) {
+      if (detachAgentDaemonBridge) {
+        detachAgentDaemonBridge();
+        detachAgentDaemonBridge = null;
+      }
+      try {
+        await server.stop();
+      } catch (stopError) {
+        console.error('[ControlPlane] Failed to cleanup server after start error:', stopError);
+      }
+      if (controlPlaneServer === server) {
+        controlPlaneServer = null;
+      }
+      throw error;
+    }
+  } catch (error: any) {
+    console.error('[ControlPlane] Auto-start error:', error);
+    return { ok: false, error: error?.message || String(error) };
+  }
+}
+
 function registerTaskAndWorkspaceMethods(server: ControlPlaneServer, deps: ControlPlaneMethodDeps): void {
   const db = deps.dbManager.getDatabase();
   const taskRepo = new TaskRepository(db);
   const workspaceRepo = new WorkspaceRepository(db);
+  const approvalRepo = new ApprovalRepository(db);
+  const eventRepo = new TaskEventRepository(db);
   const agentDaemon = deps.agentDaemon;
+  const channelGateway = deps.channelGateway;
   const isAdminClient = (client: any) => !!client?.hasScope?.('admin');
 
   const redactWorkspaceForRead = (workspace: any) => ({
@@ -335,6 +628,18 @@ function registerTaskAndWorkspaceMethods(server: ControlPlaneServer, deps: Contr
     dueDate: task.dueDate,
   });
 
+  const redactChannelForRead = (channel: any) => ({
+    id: channel.id,
+    type: channel.type,
+    name: channel.name,
+    enabled: channel.enabled,
+    status: channel.status,
+    botUsername: channel.botUsername,
+    securityConfig: channel.securityConfig ? { mode: channel.securityConfig.mode } : undefined,
+    createdAt: channel.createdAt,
+    updatedAt: channel.updatedAt,
+  });
+
   // Workspaces
   server.registerMethod(Methods.WORKSPACE_LIST, async (client) => {
     requireScope(client, 'read');
@@ -353,6 +658,32 @@ function registerTaskAndWorkspaceMethods(server: ControlPlaneServer, deps: Contr
       throw { code: ErrorCodes.INVALID_PARAMS, message: `Workspace not found: ${workspaceId}` };
     }
     return { workspace: isAdminClient(client) ? workspace : redactWorkspaceForRead(workspace) };
+  });
+
+  server.registerMethod(Methods.WORKSPACE_CREATE, async (client, params) => {
+    requireScope(client, 'admin');
+    const validated = sanitizeWorkspaceCreateParams(params);
+
+    if (workspaceRepo.existsByPath(validated.path)) {
+      throw { code: ErrorCodes.INVALID_PARAMS, message: `A workspace with path "${validated.path}" already exists` };
+    }
+
+    try {
+      await fs.mkdir(validated.path, { recursive: true });
+    } catch (error: any) {
+      throw { code: ErrorCodes.METHOD_FAILED, message: error?.message || `Failed to create workspace directory: ${validated.path}` };
+    }
+
+    const defaultPermissions = {
+      read: true,
+      write: true,
+      delete: false,
+      network: true,
+      shell: false,
+    };
+
+    const workspace = workspaceRepo.create(validated.name, validated.path, defaultPermissions as any);
+    return { workspace };
   });
 
   // Tasks
@@ -412,6 +743,24 @@ function registerTaskAndWorkspaceMethods(server: ControlPlaneServer, deps: Contr
     return { taskId: task.id, task };
   });
 
+  server.registerMethod(Methods.TASK_EVENTS, async (client, params) => {
+    requireScope(client, 'admin');
+    const { taskId, limit } = sanitizeTaskEventsParams(params);
+
+    // Note: This can be large for long tasks; we return only the most recent `limit`.
+    const all = eventRepo.findByTaskId(taskId);
+    const sliced = all.slice(Math.max(all.length - limit, 0));
+    const events = sliced.map((e) => ({
+      id: e.id,
+      taskId: e.taskId,
+      timestamp: e.timestamp,
+      type: e.type,
+      payload: sanitizeForBroadcast(e.payload),
+    }));
+
+    return { events };
+  });
+
   server.registerMethod(Methods.TASK_GET, async (client, params) => {
     requireScope(client, 'read');
     const { taskId } = sanitizeTaskIdParams(params);
@@ -453,6 +802,358 @@ function registerTaskAndWorkspaceMethods(server: ControlPlaneServer, deps: Contr
     const { taskId, message } = sanitizeTaskMessageParams(params);
     await agentDaemon.sendMessage(taskId, message);
     return { ok: true };
+  });
+
+  // Approvals
+  server.registerMethod(Methods.APPROVAL_LIST, async (client, params) => {
+    requireScope(client, 'admin');
+    const { limit, offset, taskId } = sanitizeApprovalListParams(params);
+
+    const approvals = taskId
+      ? approvalRepo.findPendingByTaskId(taskId).slice(offset, offset + limit)
+      : (() => {
+          // The repository only has findPendingByTaskId; implement global listing here.
+          const stmt = db.prepare(`
+            SELECT * FROM approvals
+            WHERE status = 'pending'
+            ORDER BY requested_at ASC
+            LIMIT ? OFFSET ?
+          `);
+          const rows = stmt.all(limit, offset) as any[];
+          return rows.map((row) => ({
+            id: String(row.id ?? ''),
+            taskId: String(row.task_id ?? ''),
+            type: row.type,
+            description: row.description,
+            details: (() => {
+              try {
+                return row.details ? JSON.parse(String(row.details)) : {};
+              } catch {
+                return {};
+              }
+            })(),
+            status: row.status,
+            requestedAt: Number(row.requested_at ?? 0),
+            resolvedAt: row.resolved_at ? Number(row.resolved_at) : undefined,
+          }));
+        })();
+
+    const enriched = approvals.map((a: any) => {
+      const t = a.taskId ? taskRepo.findById(a.taskId) : undefined;
+      return {
+        ...a,
+        ...(t ? { taskTitle: t.title, workspaceId: t.workspaceId, taskStatus: t.status } : {}),
+        details: sanitizeForBroadcast(a.details),
+      };
+    });
+
+    return { approvals: enriched };
+  });
+
+  server.registerMethod(Methods.APPROVAL_RESPOND, async (client, params) => {
+    requireScope(client, 'admin');
+    const { approvalId, approved } = sanitizeApprovalRespondParams(params);
+    const status = await agentDaemon.respondToApproval(approvalId, approved);
+    return { status };
+  });
+
+  // Channels (gateway)
+  server.registerMethod(Methods.CHANNEL_LIST, async (client) => {
+    requireScope(client, 'read');
+    const rows = db.prepare('SELECT * FROM channels ORDER BY created_at ASC').all() as any[];
+    const channels = rows.map((row) => ({
+      id: String(row.id ?? ''),
+      type: String(row.type ?? ''),
+      name: String(row.name ?? ''),
+      enabled: row.enabled === 1,
+      config: (() => {
+        try { return row.config ? JSON.parse(String(row.config)) : {}; } catch { return {}; }
+      })(),
+      securityConfig: (() => {
+        try { return row.security_config ? JSON.parse(String(row.security_config)) : { mode: 'pairing' }; } catch { return { mode: 'pairing' }; }
+      })(),
+      status: String(row.status ?? ''),
+      botUsername: row.bot_username ? String(row.bot_username) : undefined,
+      createdAt: Number(row.created_at ?? 0),
+      updatedAt: Number(row.updated_at ?? 0),
+    }));
+
+    if (!isAdminClient(client)) {
+      return { channels: channels.map(redactChannelForRead) };
+    }
+
+    return {
+      channels: channels.map((c) => ({
+        ...redactChannelForRead(c),
+        config: redactObjectSecrets(c.config),
+        securityConfig: {
+          mode: c.securityConfig?.mode,
+          allowedUsersCount: Array.isArray(c.securityConfig?.allowedUsers) ? c.securityConfig.allowedUsers.length : 0,
+        },
+      })),
+    };
+  });
+
+  server.registerMethod(Methods.CHANNEL_GET, async (client, params) => {
+    requireScope(client, 'read');
+    const { channelId } = sanitizeChannelIdParams(params);
+    const row = db.prepare('SELECT * FROM channels WHERE id = ?').get(channelId) as any;
+    if (!row) {
+      throw { code: ErrorCodes.INVALID_PARAMS, message: `Channel not found: ${channelId}` };
+    }
+
+    const channel = {
+      id: String(row.id ?? ''),
+      type: String(row.type ?? ''),
+      name: String(row.name ?? ''),
+      enabled: row.enabled === 1,
+      config: (() => {
+        try { return row.config ? JSON.parse(String(row.config)) : {}; } catch { return {}; }
+      })(),
+      securityConfig: (() => {
+        try { return row.security_config ? JSON.parse(String(row.security_config)) : { mode: 'pairing' }; } catch { return { mode: 'pairing' }; }
+      })(),
+      status: String(row.status ?? ''),
+      botUsername: row.bot_username ? String(row.bot_username) : undefined,
+      createdAt: Number(row.created_at ?? 0),
+      updatedAt: Number(row.updated_at ?? 0),
+    };
+
+    if (!isAdminClient(client)) return { channel: redactChannelForRead(channel) };
+
+    return {
+      channel: {
+        ...redactChannelForRead(channel),
+        config: redactObjectSecrets(channel.config),
+        securityConfig: {
+          mode: channel.securityConfig?.mode,
+          allowedUsersCount: Array.isArray(channel.securityConfig?.allowedUsers) ? channel.securityConfig.allowedUsers.length : 0,
+        },
+      },
+    };
+  });
+
+  server.registerMethod(Methods.CHANNEL_CREATE, async (client, params) => {
+    requireScope(client, 'admin');
+    const validated = sanitizeChannelCreateParams(params);
+
+    // Enforce one channel per type (router registers by type).
+    const existing = db.prepare('SELECT id FROM channels WHERE type = ? LIMIT 1').get(validated.type) as any;
+    if (existing?.id) {
+      throw { code: ErrorCodes.INVALID_PARAMS, message: `Channel type "${validated.type}" already exists (id=${existing.id})` };
+    }
+
+    const now = Date.now();
+    const id = randomUUID();
+    db.prepare(`
+      INSERT INTO channels (id, type, name, enabled, config, security_config, status, bot_username, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      id,
+      validated.type,
+      validated.name,
+      validated.enabled ? 1 : 0,
+      JSON.stringify(validated.config || {}),
+      JSON.stringify(validated.securityConfig || { mode: 'pairing' }),
+      'disconnected',
+      null,
+      now,
+      now
+    );
+
+    // If the gateway is running, optionally connect immediately when enabled.
+    if (validated.enabled && channelGateway) {
+      try {
+        await channelGateway.enableChannel(id);
+      } catch (error: any) {
+        // Keep the channel record but surface the connection error.
+        db.prepare('UPDATE channels SET enabled = 0, status = ?, updated_at = ? WHERE id = ?')
+          .run('disconnected', Date.now(), id);
+        throw { code: ErrorCodes.METHOD_FAILED, message: error?.message || 'Failed to enable channel' };
+      }
+    }
+
+    return { channelId: id };
+  });
+
+  server.registerMethod(Methods.CHANNEL_UPDATE, async (client, params) => {
+    requireScope(client, 'admin');
+    const { channelId, updates } = sanitizeChannelUpdateParams(params);
+
+    if (channelGateway) {
+      channelGateway.updateChannel(channelId, updates as any);
+      return { ok: true };
+    }
+
+    // Fallback: update DB only (restart required to take effect).
+    const fields: string[] = [];
+    const values: any[] = [];
+    if (updates.name !== undefined) { fields.push('name = ?'); values.push(updates.name); }
+    if (updates.config !== undefined) { fields.push('config = ?'); values.push(JSON.stringify(updates.config)); }
+    if (updates.securityConfig !== undefined) { fields.push('security_config = ?'); values.push(JSON.stringify(updates.securityConfig)); }
+    if (fields.length === 0) return { ok: true };
+    fields.push('updated_at = ?'); values.push(Date.now());
+    values.push(channelId);
+    db.prepare(`UPDATE channels SET ${fields.join(', ')} WHERE id = ?`).run(...values);
+    return { ok: true, restartRequired: true };
+  });
+
+  server.registerMethod(Methods.CHANNEL_TEST, async (client, params) => {
+    requireScope(client, 'admin');
+    const { channelId } = sanitizeChannelIdParams(params);
+    if (!channelGateway) {
+      return { success: false, error: 'Channel gateway not available (restart required)' };
+    }
+    return await channelGateway.testChannel(channelId);
+  });
+
+  server.registerMethod(Methods.CHANNEL_ENABLE, async (client, params) => {
+    requireScope(client, 'admin');
+    const { channelId } = sanitizeChannelIdParams(params);
+    if (!channelGateway) {
+      db.prepare('UPDATE channels SET enabled = 1, updated_at = ? WHERE id = ?').run(Date.now(), channelId);
+      return { ok: true, restartRequired: true };
+    }
+    await channelGateway.enableChannel(channelId);
+    return { ok: true };
+  });
+
+  server.registerMethod(Methods.CHANNEL_DISABLE, async (client, params) => {
+    requireScope(client, 'admin');
+    const { channelId } = sanitizeChannelIdParams(params);
+    if (!channelGateway) {
+      db.prepare('UPDATE channels SET enabled = 0, status = ?, updated_at = ? WHERE id = ?')
+        .run('disconnected', Date.now(), channelId);
+      return { ok: true, restartRequired: true };
+    }
+    await channelGateway.disableChannel(channelId);
+    return { ok: true };
+  });
+
+  server.registerMethod(Methods.CHANNEL_REMOVE, async (client, params) => {
+    requireScope(client, 'admin');
+    const { channelId } = sanitizeChannelIdParams(params);
+    if (!channelGateway) {
+      // Best-effort delete only the channel row. (Associated rows may remain.)
+      db.prepare('DELETE FROM channels WHERE id = ?').run(channelId);
+      return { ok: true, restartRequired: true };
+    }
+    await channelGateway.removeChannel(channelId);
+    return { ok: true };
+  });
+
+  // Config/health (sanitized; no secrets).
+  server.registerMethod(Methods.CONFIG_GET, async (client) => {
+    requireScope(client, 'read');
+    const isAdmin = isAdminClient(client);
+
+    const allWorkspaces = workspaceRepo.findAll().filter((w) => w.id !== TEMP_WORKSPACE_ID);
+    const workspacesForClient = isAdmin ? allWorkspaces : allWorkspaces.map(redactWorkspaceForRead);
+
+    const taskStatusRows = db
+      .prepare(`SELECT status, COUNT(1) AS count FROM tasks GROUP BY status`)
+      .all() as Array<{ status: string; count: number }>;
+
+    const tasksByStatus: Record<string, number> = {};
+    let taskTotal = 0;
+    for (const row of taskStatusRows) {
+      const status = String(row.status || '');
+      const count = typeof row.count === 'number' ? row.count : Number(row.count);
+      const safeCount = Number.isFinite(count) ? count : 0;
+      if (status) tasksByStatus[status] = safeCount;
+      taskTotal += safeCount;
+    }
+
+    const llmStatus = LLMProviderFactory.getConfigStatus();
+    const llm = {
+      currentProvider: llmStatus.currentProvider,
+      currentModel: llmStatus.currentModel,
+      providers: llmStatus.providers,
+    };
+    const anyLlmConfigured = llm.providers.some((p) => p.configured);
+    const currentProviderConfigured =
+      llm.providers.find((p) => p.type === llm.currentProvider)?.configured || false;
+
+    const searchStatus = SearchProviderFactory.getConfigStatus();
+
+    const controlPlane = ControlPlaneSettingsManager.getSettingsForDisplay();
+    const envImport = {
+      enabled: shouldImportEnvSettingsFromArgsOrEnv(),
+      mode: getEnvSettingsImportModeFromArgsOrEnv(),
+    };
+
+    const runtime = {
+      platform: process.platform,
+      arch: process.arch,
+      node: process.version,
+      electron: process.versions.electron,
+      coworkVersion: typeof app.getVersion === 'function' ? app.getVersion() : undefined,
+      headless: isHeadlessMode(),
+      cwd: process.cwd(),
+      userDataDir: getUserDataDir(),
+      importEnvSettings: envImport,
+    };
+
+    const warnings: string[] = [];
+    if (controlPlane.host === '0.0.0.0' || controlPlane.host === '::') {
+      warnings.push(
+        'Control Plane is bound to all interfaces (host=0.0.0.0/::). This is unsafe unless you have strong network controls (prefer loopback + SSH tunnel/Tailscale).'
+      );
+    }
+    if (allWorkspaces.length === 0) {
+      warnings.push(
+        'No workspaces configured. Set COWORK_BOOTSTRAP_WORKSPACE_PATH on startup or create one via workspace.create.'
+      );
+    }
+    if (!anyLlmConfigured) {
+      warnings.push(
+        'No LLM provider credentials configured. Set COWORK_IMPORT_ENV_SETTINGS=1 (or run with --import-env-settings) plus an API key (e.g. OPENAI_API_KEY), then restart.'
+      );
+    } else if (!currentProviderConfigured) {
+      warnings.push(
+        `Selected LLM provider "${llm.currentProvider}" is not configured. Either switch provider or configure its credentials.`
+      );
+    }
+    if (!envImport.enabled && !anyLlmConfigured) {
+      warnings.push(
+        'Tip: enable env import with COWORK_IMPORT_ENV_SETTINGS=1 (or --import-env-settings) so provider env vars are persisted into Secure Settings at boot.'
+      );
+    }
+    if (!searchStatus.isConfigured) {
+      warnings.push(
+        'No search provider configured (optional). Set TAVILY_API_KEY/BRAVE_API_KEY/SERPAPI_API_KEY if you want web search.'
+      );
+    }
+
+    // Channels summary (no secrets).
+    const channelRows = db
+      .prepare(`SELECT id, type, name, enabled, status, bot_username, security_config, created_at, updated_at FROM channels ORDER BY created_at ASC`)
+      .all() as any[];
+    const channels = channelRows.map((row) => ({
+      id: String(row.id ?? ''),
+      type: String(row.type ?? ''),
+      name: String(row.name ?? ''),
+      enabled: row.enabled === 1,
+      status: String(row.status ?? ''),
+      botUsername: row.bot_username ? String(row.bot_username) : undefined,
+      securityConfig: (() => {
+        try { return row.security_config ? JSON.parse(String(row.security_config)) : { mode: 'pairing' }; } catch { return { mode: 'pairing' }; }
+      })(),
+      createdAt: Number(row.created_at ?? 0),
+      updatedAt: Number(row.updated_at ?? 0),
+    }));
+    const channelsEnabled = channels.filter((c) => c.enabled).length;
+
+    return {
+      runtime,
+      controlPlane,
+      workspaces: { count: allWorkspaces.length, workspaces: workspacesForClient },
+      tasks: { total: taskTotal, byStatus: tasksByStatus },
+      channels: { count: channels.length, enabled: channelsEnabled, channels: channels.map(redactChannelForRead) },
+      llm,
+      search: searchStatus,
+      warnings,
+    };
   });
 }
 

@@ -241,10 +241,15 @@ export const Methods = {
   PING: 'ping',
   HEALTH: 'health',
 
+  // Approvals
+  APPROVAL_RESPOND: 'approval.respond',
+  APPROVAL_LIST: 'approval.list',
+
   // Task operations
   TASK_CREATE: 'task.create',
   TASK_GET: 'task.get',
   TASK_LIST: 'task.list',
+  TASK_EVENTS: 'task.events',
   TASK_CANCEL: 'task.cancel',
   TASK_SEND_MESSAGE: 'task.sendMessage',
 
@@ -266,4 +271,15 @@ export const Methods = {
   // Workspace operations
   WORKSPACE_LIST: 'workspace.list',
   WORKSPACE_GET: 'workspace.get',
+  WORKSPACE_CREATE: 'workspace.create',
+
+  // Channel operations (gateway)
+  CHANNEL_LIST: 'channel.list',
+  CHANNEL_GET: 'channel.get',
+  CHANNEL_CREATE: 'channel.create',
+  CHANNEL_UPDATE: 'channel.update',
+  CHANNEL_TEST: 'channel.test',
+  CHANNEL_ENABLE: 'channel.enable',
+  CHANNEL_DISABLE: 'channel.disable',
+  CHANNEL_REMOVE: 'channel.remove',
 } as const;

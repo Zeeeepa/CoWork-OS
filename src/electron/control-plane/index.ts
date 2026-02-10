@@ -28,6 +28,7 @@ export {
   setupControlPlaneHandlers,
   shutdownControlPlane,
   getControlPlaneServer,
+  startControlPlaneFromSettings,
 } from './handlers';
 export {
   RemoteGatewayClient,

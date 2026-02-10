@@ -36,6 +36,7 @@ import {
   getExposureStatus,
   type TailscaleExposureResult,
 } from '../tailscale';
+import { getControlPlaneWebUIHtml } from './web-ui';
 
 /**
  * Control plane server configuration
@@ -45,6 +46,13 @@ export interface ControlPlaneConfig {
   port?: number;
   /** Host to bind to (default: 127.0.0.1) */
   host?: string;
+  /**
+   * Whether to trust proxy headers like X-Forwarded-For when determining a client's remote address.
+   *
+   * Default: false (safer). Enable only when you run the Control Plane behind a trusted reverse proxy
+   * (and you control header injection).
+   */
+  trustProxy?: boolean;
   /** Authentication token */
   token: string;
   /** Handshake timeout in milliseconds (default: 10000) */
@@ -103,6 +111,7 @@ export class ControlPlaneServer {
     this.config = {
       port: config.port ?? 18789,
       host: config.host ?? '127.0.0.1',
+      trustProxy: config.trustProxy ?? false,
       token: config.token,
       handshakeTimeoutMs: config.handshakeTimeoutMs ?? 10000,
       heartbeatIntervalMs: config.heartbeatIntervalMs ?? 30000,
@@ -151,6 +160,31 @@ export class ControlPlaneServer {
     return new Promise((resolve, reject) => {
       // Create HTTP server for WebSocket upgrade
       this.httpServer = http.createServer((req, res) => {
+        // Minimal web UI (headless dashboard)
+        if ((req.url === '/' || req.url === '/ui') && req.method === 'GET') {
+          const html = getControlPlaneWebUIHtml();
+          res.writeHead(200, {
+            'Content-Type': 'text/html; charset=utf-8',
+            'Cache-Control': 'no-store',
+            'X-Content-Type-Options': 'nosniff',
+            'X-Frame-Options': 'DENY',
+            'Referrer-Policy': 'no-referrer',
+            // Keep this intentionally strict while allowing the single inline script/style used by the UI.
+            'Content-Security-Policy': [
+              "default-src 'none'",
+              "style-src 'unsafe-inline'",
+              "script-src 'unsafe-inline'",
+              "connect-src 'self' ws: wss:",
+              "img-src 'self' data:",
+              "base-uri 'none'",
+              "form-action 'none'",
+              "frame-ancestors 'none'",
+            ].join('; '),
+          });
+          res.end(html);
+          return;
+        }
+
         // Health check endpoint
         if (req.url === '/health' && req.method === 'GET') {
           res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -332,10 +366,15 @@ export class ControlPlaneServer {
    * Handle a new WebSocket connection
    */
   private handleConnection(socket: WebSocket, request: http.IncomingMessage): void {
-    const remoteAddress =
-      (request.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() ||
-      request.socket.remoteAddress ||
-      'unknown';
+    const remoteAddress = (() => {
+      if (this.config.trustProxy) {
+        const xff = request.headers['x-forwarded-for'];
+        const raw = typeof xff === 'string' ? xff : Array.isArray(xff) ? xff[0] : undefined;
+        const parsed = raw?.split(',')[0]?.trim();
+        if (parsed) return parsed;
+      }
+      return request.socket.remoteAddress || 'unknown';
+    })();
     const userAgent = request.headers['user-agent'];
     const origin = request.headers['origin'];
 
