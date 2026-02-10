@@ -537,10 +537,42 @@ export class DatabaseManager {
       CREATE INDEX IF NOT EXISTS idx_memory_embeddings_workspace ON memory_embeddings(workspace_id);
       CREATE INDEX IF NOT EXISTS idx_memory_summaries_workspace ON memory_summaries(workspace_id);
       CREATE INDEX IF NOT EXISTS idx_memory_summaries_period ON memory_summaries(time_period, period_start);
+
+      -- Workspace Markdown Memory Index (for kit notes, docs, and other durable markdown context)
+      CREATE TABLE IF NOT EXISTS memory_markdown_files (
+        workspace_id TEXT NOT NULL,
+        path TEXT NOT NULL,
+        content_hash TEXT NOT NULL,
+        mtime INTEGER NOT NULL,
+        size INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL,
+        PRIMARY KEY (workspace_id, path),
+        FOREIGN KEY (workspace_id) REFERENCES workspaces(id)
+      );
+
+      CREATE TABLE IF NOT EXISTS memory_markdown_chunks (
+        id TEXT PRIMARY KEY,
+        workspace_id TEXT NOT NULL,
+        path TEXT NOT NULL,
+        start_line INTEGER NOT NULL,
+        end_line INTEGER NOT NULL,
+        text TEXT NOT NULL,
+        embedding TEXT NOT NULL,
+        mtime INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL,
+        FOREIGN KEY (workspace_id) REFERENCES workspaces(id)
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_memory_markdown_files_workspace ON memory_markdown_files(workspace_id);
+      CREATE INDEX IF NOT EXISTS idx_memory_markdown_files_mtime ON memory_markdown_files(workspace_id, mtime);
+      CREATE INDEX IF NOT EXISTS idx_memory_markdown_chunks_workspace ON memory_markdown_chunks(workspace_id);
+      CREATE INDEX IF NOT EXISTS idx_memory_markdown_chunks_path ON memory_markdown_chunks(workspace_id, path);
+      CREATE INDEX IF NOT EXISTS idx_memory_markdown_chunks_mtime ON memory_markdown_chunks(workspace_id, mtime);
     `);
 
     // Initialize FTS5 for memory search (separate exec to handle if not supported)
     this.initializeMemoryFTS();
+    this.initializeMarkdownMemoryFTS();
 
     // Run migrations for Goal Mode columns (SQLite ALTER TABLE ADD COLUMN is safe if column exists)
     this.runMigrations();
@@ -584,6 +616,25 @@ export class DatabaseManager {
     } catch (error) {
       // FTS5 might not be available in all SQLite builds
       console.warn('[DatabaseManager] FTS5 initialization failed, full-text search will be disabled:', error);
+    }
+  }
+
+  private initializeMarkdownMemoryFTS() {
+    // Optional FTS5 index for workspace markdown notes (kit files, docs, etc).
+    // When unavailable, MarkdownMemoryIndexService falls back to LIKE-based search.
+    try {
+      this.db.exec(`
+        CREATE VIRTUAL TABLE IF NOT EXISTS memory_markdown_chunks_fts USING fts5(
+          text,
+          chunk_id UNINDEXED,
+          workspace_id UNINDEXED,
+          path UNINDEXED,
+          start_line UNINDEXED,
+          end_line UNINDEXED
+        );
+      `);
+    } catch (error) {
+      console.warn('[DatabaseManager] Markdown FTS5 initialization failed, markdown full-text search will be limited:', error);
     }
   }
 
