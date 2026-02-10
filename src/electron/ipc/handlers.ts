@@ -3743,6 +3743,8 @@ function setupKitHandlers(workspaceRepo: WorkspaceRepository): void {
       path.join(kitDirName, 'IDENTITY.md'),
       path.join(kitDirName, 'TOOLS.md'),
       path.join(kitDirName, 'HEARTBEAT.md'),
+      path.join(kitDirName, 'PRIORITIES.md'),
+      path.join(kitDirName, 'CROSS_SIGNALS.md'),
       path.join(kitDirName, 'memory'),
       path.join(kitDirName, 'projects'),
       path.join(kitDirName, 'agents'),
@@ -3869,6 +3871,31 @@ function setupKitHandlers(workspaceRepo: WorkspaceRepository): void {
           `- Summarize key decisions into .cowork/MEMORY.md\n\n` +
           `## Weekly\n` +
           `- Review team performance and update autonomy levels if needed\n`,
+      },
+      {
+        relPath: path.join(kitDirName, 'PRIORITIES.md'),
+        content:
+          `# Priorities\n\n` +
+          `## Current\n` +
+          `1. \n` +
+          `2. \n` +
+          `3. \n\n` +
+          `## Notes\n` +
+          `- \n\n` +
+          `## History\n`,
+      },
+      {
+        relPath: path.join(kitDirName, 'CROSS_SIGNALS.md'),
+        content:
+          `# Cross-Agent Signals\n\n` +
+          `This file is workspace-local and can be auto-updated by agents.\n` +
+          `Use it to track entities/topics that show up across multiple agents, contradictions, and amplified opportunities.\n\n` +
+          `## Signals (Last 24h)\n` +
+          `- \n\n` +
+          `## Conflicts / Contradictions\n` +
+          `- \n\n` +
+          `## Notes\n` +
+          `- \n`,
       },
       {
         relPath: path.join(kitDirName, 'projects', 'README.md'),

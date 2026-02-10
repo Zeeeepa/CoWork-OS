@@ -189,6 +189,17 @@ function buildKitSections(workspacePath: string, taskPrompt: string, now: Date):
       extractor: (raw) => sanitizeForInjection(extractBulletSections(raw, { maxSections: 10 })),
     },
     {
+      relPath: path.join(KIT_DIRNAME, 'PRIORITIES.md'),
+      title: 'Priorities',
+      // Priorities are often numbered lists; keep the (sanitized) doc rather than only "- bullets".
+      extractor: (raw) => sanitizeForInjection(clampSection(raw, MAX_SECTION_CHARS)),
+    },
+    {
+      relPath: path.join(KIT_DIRNAME, 'CROSS_SIGNALS.md'),
+      title: 'Cross-Agent Signals',
+      extractor: (raw) => sanitizeForInjection(clampSection(raw, MAX_SECTION_CHARS)),
+    },
+    {
       relPath: path.join(KIT_DIRNAME, 'memory', `${stamp}.md`),
       title: `Daily Log (${stamp})`,
       extractor: (raw) =>

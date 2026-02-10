@@ -38,6 +38,23 @@ describe('WorkspaceKitContext', () => {
     expect(out).toContain('Be concise');
   });
 
+  it('includes PRIORITIES.md and CROSS_SIGNALS.md when present', () => {
+    writeFile(
+      path.join(tmpDir, '.cowork', 'PRIORITIES.md'),
+      ['# Priorities', '', '## Current', '1. Ship context retention', '2. Improve feedback loop', ''].join('\n')
+    );
+    writeFile(
+      path.join(tmpDir, '.cowork', 'CROSS_SIGNALS.md'),
+      ['# Cross-Agent Signals', '', '## Signals (Last 24h)', '- ExampleCo appears in 3 agents', ''].join('\n')
+    );
+
+    const out = buildWorkspaceKitContext(tmpDir, 'any');
+    expect(out).toContain('Priorities (.cowork/PRIORITIES.md)');
+    expect(out).toContain('Ship context retention');
+    expect(out).toContain('Cross-Agent Signals (.cowork/CROSS_SIGNALS.md)');
+    expect(out).toContain('ExampleCo appears');
+  });
+
   it('includes docs/CODEBASE_MAP.md content when present (even without .cowork)', () => {
     writeFile(
       path.join(tmpDir, 'docs', 'CODEBASE_MAP.md'),

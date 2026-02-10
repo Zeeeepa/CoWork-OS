@@ -58,6 +58,7 @@ const MAX_TOOL_RESULT_CHARS = MAX_TOOL_RESULT_TOKENS * 4;
 const PINNED_MESSAGE_TAG_PREFIXES = [
   '<cowork_memory_recall>',
   '<cowork_compaction_summary>',
+  '<cowork_shared_context>',
 ] as const;
 
 function messageTextForPinnedCheck(message: LLMMessage): string {

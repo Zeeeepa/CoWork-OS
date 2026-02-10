@@ -68,6 +68,8 @@ describe('Memory Kit Skill', () => {
       expect(skillData.prompt).toContain('.cowork/USER.md');
       expect(skillData.prompt).toContain('.cowork/MEMORY.md');
       expect(skillData.prompt).toContain('.cowork/HEARTBEAT.md');
+      expect(skillData.prompt).toContain('.cowork/PRIORITIES.md');
+      expect(skillData.prompt).toContain('.cowork/CROSS_SIGNALS.md');
       expect(skillData.prompt).toContain('.cowork/TOOLS.md');
       expect(skillData.prompt).toContain('.cowork/IDENTITY.md');
       expect(skillData.prompt).toContain('.cowork/BOOTSTRAP.md');
@@ -107,4 +109,3 @@ describe('Memory Kit Skill', () => {
     });
   });
 });
-
