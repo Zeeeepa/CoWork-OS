@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.52] - 2026-02-10
+
+### Fixed
+- macOS `npm run setup` could fail with `Killed: 9` during native module rebuild; native setup now defaults to low parallelism for reliability.
+
 ## [0.3.29] - 2025-02-08
 
 ### Added
