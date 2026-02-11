@@ -140,19 +140,38 @@ The packaged app will be in the `release/` directory.
 
 If this is your first VPS install, start here (Node-only, no Docker):
 
-1. On your VPS (SSH terminal), install and start CoWork OS:
+1. On your VPS (SSH terminal), connect and verify Node version:
 
 ```bash
 ssh user@your-vps
-npm install -g cowork-os@latest
+node -v
+npm -v
+```
+
+`cowork-os` requires Node `>=22.12.0`. If you see `v20`/`v21`, upgrade first:
+
+```bash
+curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
+sudo apt-get install -y nodejs
+node -v
+```
+
+2. Install and start CoWork OS (local install, no sudo needed):
+
+```bash
+mkdir -p ~/cowork-run
+cd ~/cowork-run
+npm init -y >/dev/null
+npm install cowork-os@latest --no-audit --no-fund
+
 export COWORK_IMPORT_ENV_SETTINGS=1
 export OPENAI_API_KEY=your_key_here   # or ANTHROPIC_API_KEY=your_key_here
-coworkd-node --print-control-plane-token
+npx coworkd-node --print-control-plane-token
 ```
 
 Keep this terminal open. It runs the server and prints your Control Plane token.
 
-2. On your local machine (second terminal), create the SSH tunnel:
+3. On your local machine (second terminal), create the SSH tunnel:
 
 ```bash
 ssh -N -L 18789:127.0.0.1:18789 user@your-vps
@@ -164,7 +183,7 @@ If local port `18789` is busy:
 ssh -N -L 28789:127.0.0.1:18789 user@your-vps
 ```
 
-3. Open the web UI in your browser:
+4. Open the web UI in your browser:
 
 - `http://127.0.0.1:18789/` (or `http://127.0.0.1:28789/` if you used 28789)
 - Paste the token from step 1

@@ -40,20 +40,27 @@ node -v
 npm -v
 ```
 
-If either command is missing, install Node.js 22:
+`cowork-os` requires Node `>=22.12.0`.
+
+If either command is missing, or you see `v20`/`v21`, install Node.js 22:
 
 ```bash
 curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
 sudo apt-get install -y nodejs
+node -v
 ```
 
-3. Install and start CoWork OS (Node-only daemon):
+3. Install and start CoWork OS (Node-only daemon, no sudo/global npm required):
 
 ```bash
-npm install -g cowork-os@latest
+mkdir -p ~/cowork-run
+cd ~/cowork-run
+npm init -y >/dev/null
+npm install cowork-os@latest --no-audit --no-fund
+
 export COWORK_IMPORT_ENV_SETTINGS=1
 export OPENAI_API_KEY=your_key_here   # or: export ANTHROPIC_API_KEY=your_key_here
-coworkd-node --print-control-plane-token
+npx coworkd-node --print-control-plane-token
 ```
 
 Keep this terminal open. It runs the server and prints the token you need for login.
@@ -76,6 +83,13 @@ ssh -N -L 28789:127.0.0.1:18789 user@your-vps
 - Paste the Control Plane token printed in step 3
 
 This quick start is great for first run/testing. For always-on production, continue with **Option A (Docker)** or **Option B (Systemd)** below.
+
+### Common First-Run Errors
+
+- `npm WARN EBADENGINE`:
+  Node version is too old. Install Node 22 and retry step 3.
+- `npm ERR! EACCES` on `npm install -g ...`:
+  This guide intentionally uses local install (`npm install` + `npx coworkd-node`) so you do not need global npm permissions.
 
 ## Option A: Docker (Headless Electron)
 
