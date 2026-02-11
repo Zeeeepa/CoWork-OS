@@ -1,6 +1,6 @@
 {
   "name": "cowork-os",
-  "version": "0.3.62",
+  "version": "0.3.63",
   "description": "CoWork OS - The operating system for personal AI assistants",
   "overrides": {
     "undici": "^7.0.0"
@@ -38,7 +38,31 @@
     "local-first",
     "byok"
   ],
+  "files": [
+    "src",
+    "scripts",
+    "resources",
+    "connectors",
+    "build",
+    "deploy",
+    "bin",
+    "docs",
+    ".npmrc",
+    ".env.example",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE",
+    "tsconfig.json",
+    "tsconfig.daemon.json",
+    "tsconfig.electron.json",
+    "tsconfig.node.json",
+    "vite.config.ts"
+  ],
   "private": false,
+  "bundleDependencies": [
+    "@mariozechner/pi-ai",
+    "@whiskeysockets/baileys"
+  ],
   "scripts": {
     "setup": "npm install --no-audit --no-fund && { sleep 2; i=1; max=${COWORK_SETUP_NATIVE_OUTER_ATTEMPTS:-6}; delay=2; while [ $i -le $max ]; do echo \"[cowork] setup:native (outer attempt $i/$max)\"; sh scripts/setup_native_retry.sh; s=$?; if [ $s -eq 0 ]; then exit 0; fi; if [ $s -ne 137 ] && [ $s -ne 9 ]; then exit $s; fi; echo \"[cowork] setup:native was killed; retrying in ${delay}s...\"; sleep $delay; delay=$((delay * 2)); if [ $delay -gt 20 ]; then delay=20; fi; i=$((i + 1)); done; exit $s; }",
     "setup:native": "sleep 2; i=1; max=${COWORK_SETUP_NATIVE_OUTER_ATTEMPTS:-6}; delay=2; while [ $i -le $max ]; do echo \"[cowork] setup:native (outer attempt $i/$max)\"; sh scripts/setup_native_retry.sh; s=$?; if [ $s -eq 0 ]; then exit 0; fi; if [ $s -ne 137 ] && [ $s -ne 9 ]; then exit $s; fi; echo \"[cowork] setup:native was killed; retrying in ${delay}s...\"; sleep $delay; delay=$((delay * 2)); if [ $delay -gt 20 ]; then delay=20; fi; i=$((i + 1)); done; exit $s",

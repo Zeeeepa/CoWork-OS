@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.63] - 2026-02-11
+
+### Fixed
+- npm installs could still fail with `SIGKILL` in transitive `protobufjs` postinstall hooks under macOS memory pressure.
+- Bundled `@mariozechner/pi-ai` and `@whiskeysockets/baileys` in the published npm tarball so their transitive install scripts are not executed on end-user `npm install`.
+- Restricted published package contents via `files` in `package.json` to remove large non-runtime artifacts and reduce install-time memory pressure.
+
 ## [0.3.62] - 2026-02-11
 
 ### Fixed
