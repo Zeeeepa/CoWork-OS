@@ -78,6 +78,22 @@ jobs:
       - name: Build application
         run: npm run build
 
+      - name: Prepare package.json for electron-builder
+        run: |
+          node -e "
+            const fs = require('fs');
+            const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
+            pkg.dependencies = pkg.dependencies || {};
+            pkg.devDependencies = pkg.devDependencies || {};
+            for (const dep of ['electron', '@electron/rebuild']) {
+              if (pkg.dependencies[dep]) {
+                pkg.devDependencies[dep] = pkg.dependencies[dep];
+                delete pkg.dependencies[dep];
+              }
+            }
+            fs.writeFileSync('package.json', JSON.stringify(pkg, null, 2) + '\\n');
+          "
+
       - name: Package application
         run: npm run package
         env:
