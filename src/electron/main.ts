@@ -31,6 +31,7 @@ import { ChannelGateway } from './gateway';
 import { formatChatTranscriptForPrompt } from './gateway/chat-transcript';
 import { updateManager } from './updater';
 import { importProcessEnvToSettings, migrateEnvToSettings } from './utils/env-migration';
+import { TEMP_WORKSPACE_ID } from '../../shared/types';
 import { GuardrailManager } from './guardrails/guardrail-manager';
 import { AppearanceManager } from './settings/appearance-manager';
 import { MemoryFeaturesManager } from './settings/memory-features-manager';
@@ -569,6 +570,11 @@ app.whenReady().then(async () => {
     const taskRepo = new TaskRepository(db);
     const workspaceRepo = new WorkspaceRepository(db);
 
+    const resolveDefaultWorkspace = (): ReturnType<typeof workspaceRepo.findById> | undefined => {
+      const workspaces = workspaceRepo.findAll();
+      return workspaces.find((workspace) => workspace.id !== TEMP_WORKSPACE_ID) ?? workspaces[0];
+    };
+
     // Initialize HeartbeatService with dependencies
     const heartbeatDeps: HeartbeatServiceDeps = {
       agentRoleRepo,
@@ -593,9 +599,14 @@ app.whenReady().then(async () => {
         return tasks.filter((t: { assignedAgentRoleId?: string }) => t.assignedAgentRoleId === agentRoleId);
       },
       getDefaultWorkspaceId: () => {
-        // Get the first workspace as default
-        const workspaces = workspaceRepo.findAll();
-        return workspaces[0]?.id;
+        return resolveDefaultWorkspace()?.id;
+      },
+      getDefaultWorkspacePath: () => {
+        return resolveDefaultWorkspace()?.path;
+      },
+      getWorkspacePath: (workspaceId: string) => {
+        const workspace = workspaceRepo.findById(workspaceId);
+        return workspace?.path;
       },
     };
 

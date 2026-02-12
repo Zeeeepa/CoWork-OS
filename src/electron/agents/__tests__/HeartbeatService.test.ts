@@ -47,13 +47,19 @@ function createAgent(id: string, options: Partial<AgentRole> = {}): AgentRole {
 }
 
 // Helper to create test mention
-function createMention(id: string, agentId: string, isPending: boolean = true): AgentMention {
+function createMention(
+  id: string,
+  agentId: string,
+  isPending: boolean = true,
+  workspaceId: string = 'workspace-1'
+): AgentMention {
   const mention: AgentMention = {
     id,
     agentRoleId: agentId,
     mentionType: 'direct',
     sourceType: 'message',
     sourceId: 'msg-1',
+    workspaceId,
     status: isPending ? 'pending' : 'acknowledged',
     createdAt: Date.now(),
     updatedAt: Date.now(),
@@ -166,6 +172,16 @@ describe('HeartbeatService', () => {
         return results;
       },
       getDefaultWorkspaceId: () => 'workspace-1',
+      getDefaultWorkspacePath: () => '/tmp/default-workspace',
+      getWorkspacePath: (workspaceId: string) => {
+        if (workspaceId === 'workspace-1') {
+          return '/tmp/workspace-1';
+        }
+        if (workspaceId === 'workspace-2') {
+          return '/tmp/workspace-2';
+        }
+        return undefined;
+      },
     };
 
     service = new HeartbeatService(deps);
@@ -257,6 +273,91 @@ describe('HeartbeatService', () => {
 
       expect(result.assignedTasks).toBe(2);
       expect(result.status).toBe('work_done');
+    });
+
+    it('selects workspace from pending mentions for role-profile context', async () => {
+      createAgent('agent-1', { heartbeatEnabled: true });
+      createMention('mention-1', 'agent-1', true, 'workspace-2');
+
+      const result = await service.triggerHeartbeat('agent-1');
+
+      expect(result.status).toBe('work_done');
+      expect(createdTasks).toHaveLength(1);
+      expect(createdTasks[0].workspaceId).toBe('workspace-2');
+    });
+
+    it('ignores blank workspace IDs when selecting workspace context', async () => {
+      createAgent('agent-1', { heartbeatEnabled: true });
+      createMention('mention-1', 'agent-1', true, '   ');
+
+      const result = await service.triggerHeartbeat('agent-1');
+
+      expect(result.status).toBe('work_done');
+      expect(createdTasks).toHaveLength(1);
+      expect(createdTasks[0].workspaceId).toBe('workspace-1');
+    });
+
+    it('falls back to default workspace if top candidate workspace no longer exists', async () => {
+      createAgent('agent-1', { heartbeatEnabled: true });
+      createMention('mention-1', 'agent-1', true, 'workspace-2');
+
+      deps.getWorkspacePath = (workspaceId: string) => {
+        if (workspaceId === 'workspace-1') {
+          return '/tmp/workspace-1';
+        }
+        return undefined;
+      };
+
+      const result = await service.triggerHeartbeat('agent-1');
+
+      expect(result.status).toBe('work_done');
+      expect(createdTasks).toHaveLength(1);
+      expect(createdTasks[0].workspaceId).toBe('workspace-1');
+    });
+
+    it('prefers mentions over assigned tasks when workspace timestamps are tied', async () => {
+      const now = Date.now();
+
+      createAgent('agent-1', { heartbeatEnabled: true });
+      createMention('mention-1', 'agent-1', true, 'workspace-1');
+      createTask('task-1', 'agent-1');
+
+      const mention = mockMentions.get('mention-1');
+      if (mention) {
+        mention.createdAt = now;
+        mention.updatedAt = now;
+      }
+
+      const task = mockTasks.get('task-1');
+      if (task) {
+        task.updatedAt = now;
+        task.workspaceId = 'workspace-2';
+      }
+
+      await service.triggerHeartbeat('agent-1');
+
+      expect(createdTasks[0].workspaceId).toBe('workspace-1');
+    });
+
+    it('skips empty workspace path values from candidates', async () => {
+      createAgent('agent-1', { heartbeatEnabled: true });
+      createMention('mention-1', 'agent-1', true, 'workspace-2');
+
+      deps.getWorkspacePath = (workspaceId: string) => {
+        if (workspaceId === 'workspace-1') {
+          return '/tmp/workspace-1';
+        }
+        if (workspaceId === 'workspace-2') {
+          return '   ';
+        }
+        return undefined;
+      };
+
+      const result = await service.triggerHeartbeat('agent-1');
+
+      expect(result.status).toBe('work_done');
+      expect(createdTasks).toHaveLength(1);
+      expect(createdTasks[0].workspaceId).toBe('workspace-1');
     });
 
     it('should create task when work is found', async () => {

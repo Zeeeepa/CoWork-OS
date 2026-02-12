@@ -579,10 +579,19 @@ export class AgentDaemon extends EventEmitter {
       const planSummary = this.buildPlanSummary(plan);
 
     for (const role of rolesToDispatch) {
+      const workspacePath = task.workspaceId
+        ? this.workspaceRepo.findById(task.workspaceId)?.path
+        : undefined;
+
       const childPrompt = buildAgentDispatchPrompt(
         role,
         { title: task.title, prompt: task.prompt },
-        { ...(planSummary ? { planSummary } : {}), includeRoleDetails: false }
+        {
+          ...(planSummary ? { planSummary } : {}),
+          includeRoleDetails: false,
+          includeRoleProfile: true,
+          workspacePath,
+        }
       );
       const childTask = await this.createChildTask({
         title: `@${role.displayName}: ${task.title}`,

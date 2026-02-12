@@ -193,6 +193,7 @@ ssh -N -L 28789:127.0.0.1:18789 user@your-vps
 
 - `http://127.0.0.1:18789/` (or `http://127.0.0.1:28789/` if you used 28789)
 - Paste the token from step 1
+- If you skipped `OPENAI_API_KEY`/`ANTHROPIC_API_KEY`, use the **LLM Setup** panel in this UI to configure provider credentials.
 
 For production/persistent setup and Docker/systemd options, use:
 
@@ -488,6 +489,40 @@ Notes:
 - Project access rules are enforced for file/edit/grep tools and for project context injection.
 
 Configure in **Settings** > **Memory Hub**.
+
+### Role Profile Files (`.cowork/agents/`)
+
+You can define per-role personality and operating guidelines directly in workspace files.  
+When a role runs, CoWork loads these first; if missing, it falls back to legacy role metadata.
+
+Expected structure:
+
+| File | Purpose |
+|---|---|
+| `.cowork/agents/<role-id>/SOUL.md` | Role personality, behavior style, and execution philosophy |
+| `.cowork/agents/<role-id>/IDENTITY.md` | Role-specific identity and constraints |
+| `.cowork/agents/<role-id>/RULES.md` | Operational rules, safety boundaries, communication defaults |
+
+Role resolution checks these folder candidates in order:
+
+- `<normalized role.name>` (keeps folder-safe letters, numbers, `_`, `-`, `.`)
+- slugified variant of role name (ASCII-safe fallback)
+- `<normalized role.displayName>` (same normalization)
+- slugified variant of displayName
+- `<normalized role.id>`
+- slugified variant of id
+- `default`
+
+Only non-empty `.cowork/agents/...` files are used. If no files are found, CoWork uses existing DB role `soul` notes.
+
+Tips:
+
+- Start by cloning a profile from an existing role: copy one `*.md` file to a new role folder.
+- Keep templates simple; the first 4k chars per file are injected into prompts.
+- Keep sensitive values out of these files; `.cowork` content is sanitized before use.
+- Quick scaffold:
+  - `mkdir -p .cowork/agents/<role-id> && printf '%s\n' "# SOUL.md" "..." > .cowork/agents/<role-id>/SOUL.md`
+  - If you are unsure about the folder name, place a `default` profile at `.cowork/agents/default/` and copy it to `.../<role-id>/`.
 
 ### Agent Teams
 

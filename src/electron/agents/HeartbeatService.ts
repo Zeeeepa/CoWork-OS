@@ -13,6 +13,7 @@ import { AgentRoleRepository } from './AgentRoleRepository';
 import { MentionRepository } from './MentionRepository';
 import { ActivityRepository } from '../activity/ActivityRepository';
 import { WorkingStateRepository } from './WorkingStateRepository';
+import { buildRolePersonaPrompt } from './role-persona';
 
 /**
  * Work items found during heartbeat check
@@ -34,6 +35,8 @@ export interface HeartbeatServiceDeps {
   createTask: (workspaceId: string, prompt: string, title: string, agentRoleId?: string) => Promise<Task>;
   getTasksForAgent: (agentRoleId: string, workspaceId?: string) => Task[];
   getDefaultWorkspaceId: () => string | undefined;
+  getDefaultWorkspacePath: () => string | undefined;
+  getWorkspacePath: (workspaceId: string) => string | undefined;
 }
 
 /**
@@ -277,9 +280,14 @@ export class HeartbeatService extends EventEmitter {
       if (hasWork) {
         result.status = 'work_done';
 
+        const selectedWorkspace = this.selectWorkspaceForWork(workItems);
+        const workspacePath = selectedWorkspace
+          ? selectedWorkspace.workspacePath
+          : this.deps.getDefaultWorkspacePath();
+
         // Build prompt for agent to handle the work
-        const prompt = this.buildHeartbeatPrompt(agent, workItems);
-        const workspaceId = this.deps.getDefaultWorkspaceId();
+        const prompt = this.buildHeartbeatPrompt(agent, workItems, workspacePath);
+        const workspaceId = selectedWorkspace?.workspaceId || this.deps.getDefaultWorkspaceId();
 
         if (workspaceId) {
           const task = await this.deps.createTask(
@@ -371,29 +379,69 @@ export class HeartbeatService extends EventEmitter {
     };
   }
 
+  private selectWorkspaceForWork(
+    work: WorkItems
+  ): { workspaceId: string; workspacePath: string } | undefined {
+    const candidates = new Map<string, { score: number; priority: number }>();
+    const addCandidate = (workspaceIdRaw: string | undefined, score: number, priority: number): void => {
+      const workspaceId =
+        typeof workspaceIdRaw === 'string' ? workspaceIdRaw.trim() : '';
+      if (!workspaceId) return;
+
+      const existing = candidates.get(workspaceId);
+      if (!existing || score > existing.score || (score === existing.score && priority > existing.priority)) {
+        candidates.set(workspaceId, { score, priority });
+      }
+    };
+
+    for (const mention of work.pendingMentions) {
+      addCandidate(mention.workspaceId, mention.createdAt, 2);
+    }
+
+    for (const task of work.assignedTasks) {
+      addCandidate(task.workspaceId, task.updatedAt ?? 0, 1);
+    }
+
+    const sortedCandidates = Array.from(candidates.entries())
+      .map(([workspaceId, info]) => ({ workspaceId, ...info }))
+      .sort((a, b) => {
+        if (b.score !== a.score) return b.score - a.score;
+        if (b.priority !== a.priority) return b.priority - a.priority;
+        return a.workspaceId.localeCompare(b.workspaceId);
+      });
+
+    for (const candidate of sortedCandidates) {
+      const workspacePath = this.deps.getWorkspacePath(candidate.workspaceId);
+      if (typeof workspacePath === 'string' && workspacePath.trim().length === 0) {
+        continue;
+      }
+
+      if (!workspacePath) {
+        continue;
+      }
+
+      return {
+        workspaceId: candidate.workspaceId,
+        workspacePath,
+      };
+    }
+
+    return undefined;
+  }
+
   /**
    * Build a prompt for the agent to handle pending work
    */
-  private buildHeartbeatPrompt(agent: AgentRole, work: WorkItems): string {
+  private buildHeartbeatPrompt(agent: AgentRole, work: WorkItems, workspacePath?: string): string {
     const lines: string[] = [
       `You are ${agent.displayName}, waking up for a scheduled heartbeat check.`,
       '',
     ];
 
-    // Add agent soul if available
-    if (agent.soul) {
-      try {
-        const soul = JSON.parse(agent.soul);
-        if (soul.communicationStyle) {
-          lines.push(`Communication style: ${soul.communicationStyle}`);
-        }
-        if (soul.focusAreas?.length) {
-          lines.push(`Focus areas: ${soul.focusAreas.join(', ')}`);
-        }
-        lines.push('');
-      } catch {
-        // Invalid JSON, skip
-      }
+    const rolePersona = buildRolePersonaPrompt(agent, workspacePath);
+    if (rolePersona) {
+      lines.push(rolePersona);
+      lines.push('');
     }
 
     // Add pending mentions
