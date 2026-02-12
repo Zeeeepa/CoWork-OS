@@ -418,6 +418,8 @@ Configure in **Settings** > **Appearance**.
 - **Performance Reviews**: Score and review agent-role outcomes, with autonomy-level recommendations
 - **Voice Calls**: Outbound phone calls via ElevenLabs Agents (list agents, list numbers, initiate calls)
 - **Vision**: Analyze workspace images (screenshots, photos, diagrams) via `analyze_image` tool (OpenAI, Anthropic, or Gemini)
+- **X Browser Fallback**: `x_action` automatically falls back to browser-mode read/write flows when Bird CLI is blocked (rate limits, auth challenges, access issues)
+- **Attachment OCR (Optional)**: Extract image text in local file previews with Tesseract (`tesseract` binary must be installed and on `PATH`)
 - **Image Generation**: Create images via `generate_image` with multi-provider support (Gemini, OpenAI gpt-image-1/1.5/DALL-E, Azure OpenAI) and automatic provider selection
 - **Visual Annotation**: Iterative image refinement with the Visual Annotator — generate, annotate, refine, repeat until approved
 - **Email IMAP Access**: Direct IMAP mailbox access via `email_imap_unread` — check unread emails without needing Google Workspace
@@ -1715,7 +1717,7 @@ Claude Code-style tools for developers.
 → grep pattern="TODO:" glob="*.ts"
 ```
 
-**Smart Document Detection**: Automatically detects document-heavy workspaces (PDF/DOCX) and provides helpful guidance to use `read_file` instead, since grep only searches text files.
+**Smart Document Detection**: Automatically detects document-heavy workspaces (PDF/DOCX/PPTX) and provides helpful guidance to use `read_file` instead, since grep only searches text files.
 
 ### edit_file - Surgical Editing
 
