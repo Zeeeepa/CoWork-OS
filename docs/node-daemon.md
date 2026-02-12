@@ -56,6 +56,7 @@ export COWORK_CONTROL_PLANE_URL=ws://127.0.0.1:18789
 export COWORK_CONTROL_PLANE_TOKEN=... # printed on first token generation or via --print-control-plane-token
 
 node bin/coworkctl.js call config.get
+node bin/coworkctl.js call llm.configure '{"providerType":"openai","apiKey":"sk-...","model":"gpt-4o-mini"}'
 node bin/coworkctl.js call workspace.create '{"name":"main","path":"/srv/cowork/workspace"}'
 node bin/coworkctl.js call task.create '{"workspaceId":"...","title":"Test","prompt":"Say hi"}'
 node bin/coworkctl.js watch --event task.event
@@ -64,4 +65,3 @@ node bin/coworkctl.js watch --event task.event
 ## Headless Limitations (Expected)
 
 Some tools are desktop-only (clipboard, screenshot capture, opening files in Finder/Explorer, etc). In the Node daemon these will return a clear error instead of trying to use Electron APIs.
-

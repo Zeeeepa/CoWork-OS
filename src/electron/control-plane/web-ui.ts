@@ -108,7 +108,7 @@ export function getControlPlaneWebUIHtml(): string {
       <header>
         <div>
           <h1>CoWork OS Control Plane</h1>
-          <div class="sub">Headless dashboard (workspaces, tasks, approvals). Use over SSH tunnel or Tailscale.</div>
+          <div class="sub">Headless dashboard (LLM setup, workspaces, tasks, approvals). Use over SSH tunnel or Tailscale.</div>
         </div>
         <div class="pill" id="connPill"><span class="dot" id="connDot"></span><span id="connText">Disconnected</span></div>
       </header>
@@ -168,6 +168,40 @@ export function getControlPlaneWebUIHtml(): string {
           </div>
           <div class="log" id="statusBox"></div>
           <div class="hint">Sanitized runtime/config health (no secrets). Useful for headless/Linux deployments.</div>
+        </div>
+
+        <div class="card" style="grid-column: 1 / -1;">
+          <h2>LLM Setup</h2>
+          <div class="split">
+            <div>
+              <label>Provider</label>
+              <select id="llmProvider"></select>
+              <div class="muted small" id="llmProviderStatus" style="margin-top:6px;"></div>
+            </div>
+            <div>
+              <label>API Key / Token</label>
+              <input id="llmApiKey" type="password" placeholder="Optional for provider switch-only" autocomplete="off" />
+            </div>
+          </div>
+          <div class="split" style="margin-top: 10px;">
+            <div>
+              <label>Model (optional)</label>
+              <input id="llmModel" placeholder="e.g. gpt-4o-mini, sonnet-4-5, gemini-2.0-flash" />
+            </div>
+            <div>
+              <label>Provider Settings JSON (optional)</label>
+              <textarea id="llmSettingsJson" class="mono" placeholder='{"baseUrl":"http://127.0.0.1:11434"}'></textarea>
+            </div>
+          </div>
+          <div class="row" style="margin-top: 10px;">
+            <button class="btn primary" id="btnSaveLlm" disabled>Save LLM Settings</button>
+            <span class="muted small" id="llmSaveResult"></span>
+          </div>
+          <div class="hint">
+            Stored encrypted on server. JSON examples: Ollama <code>{"baseUrl":"http://127.0.0.1:11434"}</code>,
+            Azure <code>{"endpoint":"https://...","deployment":"..."}</code>,
+            Bedrock <code>{"region":"us-east-1","profile":"default"}</code>.
+          </div>
         </div>
 
         <div class="card" style="grid-column: 1 / -1;">
@@ -344,6 +378,13 @@ export function getControlPlaneWebUIHtml(): string {
       const btnRefreshStatus = el('btnRefreshStatus');
       const statusSummaryEl = el('statusSummary');
       const statusBox = el('statusBox');
+      const llmProvider = el('llmProvider');
+      const llmApiKey = el('llmApiKey');
+      const llmModel = el('llmModel');
+      const llmSettingsJson = el('llmSettingsJson');
+      const llmProviderStatus = el('llmProviderStatus');
+      const btnSaveLlm = el('btnSaveLlm');
+      const llmSaveResult = el('llmSaveResult');
 
       const btnRefreshChannels = el('btnRefreshChannels');
       const channelCountEl = el('channelCount');
@@ -450,6 +491,7 @@ export function getControlPlaneWebUIHtml(): string {
         btnRefresh.disabled = !connected;
         btnRefreshApprovals.disabled = !connected;
         btnRefreshStatus.disabled = !connected;
+        btnSaveLlm.disabled = !connected;
         btnRefreshChannels.disabled = !connected;
         btnRefreshWorkspaces.disabled = !connected;
         btnRefreshTasks.disabled = !connected;
@@ -710,6 +752,7 @@ export function getControlPlaneWebUIHtml(): string {
         if (!status) {
           statusSummaryEl.textContent = '';
           statusBox.textContent = '';
+          renderLlmSetup();
           return;
         }
         const warnings = Array.isArray(status.warnings) ? status.warnings : [];
@@ -721,6 +764,80 @@ export function getControlPlaneWebUIHtml(): string {
         }
         out += safeJson(status);
         statusBox.textContent = out;
+        renderLlmSetup();
+      }
+
+      function renderLlmSetup() {
+        const llm = status && status.llm ? status.llm : null;
+        const providers = llm && Array.isArray(llm.providers) ? llm.providers : [];
+
+        llmProvider.innerHTML = '';
+        if (!providers.length) {
+          const opt = document.createElement('option');
+          opt.value = '';
+          opt.textContent = 'No providers';
+          llmProvider.appendChild(opt);
+          llmProviderStatus.textContent = 'No provider metadata available';
+          return;
+        }
+
+        for (const p of providers) {
+          const opt = document.createElement('option');
+          opt.value = String(p.type || '');
+          opt.textContent = String(p.name || p.type || '') + (p.configured ? ' [configured]' : '');
+          llmProvider.appendChild(opt);
+        }
+
+        const targetProvider = llm && llm.currentProvider ? String(llm.currentProvider) : String(providers[0].type || '');
+        if (targetProvider) {
+          llmProvider.value = targetProvider;
+        }
+
+        if (!llmModel.value && llm && llm.currentModel) {
+          llmModel.placeholder = 'Current: ' + String(llm.currentModel);
+        }
+        updateLlmSettingsPlaceholder();
+        updateSelectedLlmProviderStatus();
+      }
+
+      function updateLlmSettingsPlaceholder() {
+        const provider = (llmProvider.value || '').trim();
+        if (provider === 'ollama') {
+          llmSettingsJson.placeholder = '{"baseUrl":"http://127.0.0.1:11434"}';
+          return;
+        }
+        if (provider === 'azure') {
+          llmSettingsJson.placeholder = '{"endpoint":"https://...","deployment":"...","apiVersion":"2024-10-21"}';
+          return;
+        }
+        if (provider === 'bedrock') {
+          llmSettingsJson.placeholder = '{"region":"us-east-1","profile":"default"}';
+          return;
+        }
+        if (provider === 'pi') {
+          llmSettingsJson.placeholder = '{"provider":"anthropic"}';
+          return;
+        }
+        llmSettingsJson.placeholder = '{"baseUrl":"https://..."}';
+      }
+
+      function updateSelectedLlmProviderStatus() {
+        const llm = status && status.llm ? status.llm : null;
+        const providers = llm && Array.isArray(llm.providers) ? llm.providers : [];
+        const provider = (llmProvider.value || '').trim();
+        if (!provider || providers.length === 0) {
+          llmProviderStatus.textContent = '';
+          return;
+        }
+
+        const matched = providers.find((p) => String(p.type || '') === provider);
+        if (!matched) {
+          llmProviderStatus.textContent = '';
+          return;
+        }
+
+        const state = matched.configured ? 'configured' : 'not configured';
+        llmProviderStatus.textContent = `Selected provider status: ${state}`;
       }
 
       async function refreshStatus() {
@@ -853,6 +970,57 @@ export function getControlPlaneWebUIHtml(): string {
       btnRefreshWorkspaces.onclick = () => refreshWorkspaces().catch((e) => alert(e?.message || e));
       btnRefreshTasks.onclick = () => refreshTasks().catch((e) => alert(e?.message || e));
       btnRefreshApprovals.onclick = () => refreshApprovals().catch((e) => alert(e?.message || e));
+
+      llmProvider.onchange = () => {
+        updateLlmSettingsPlaceholder();
+        updateSelectedLlmProviderStatus();
+      };
+      btnSaveLlm.onclick = async () => {
+        llmSaveResult.textContent = '';
+        const providerType = (llmProvider.value || '').trim();
+        if (!providerType) {
+          llmSaveResult.textContent = 'Provider required';
+          return;
+        }
+
+        const payload: { providerType: string; apiKey?: string; model?: string; settings?: Record<string, unknown> } = {
+          providerType,
+          apiKey: undefined,
+          model: undefined,
+          settings: undefined,
+        };
+        const apiKey = (llmApiKey.value || '').trim();
+        const model = (llmModel.value || '').trim();
+        if (apiKey) payload.apiKey = apiKey;
+        if (model) payload.model = model;
+
+        const rawSettings = (llmSettingsJson.value || '').trim();
+        if (rawSettings) {
+          try {
+            const parsed = JSON.parse(rawSettings);
+            if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+              llmSaveResult.textContent = 'Provider settings JSON must be an object';
+              return;
+            }
+            payload.settings = parsed;
+          } catch {
+            llmSaveResult.textContent = 'Provider settings JSON is invalid';
+            return;
+          }
+        }
+
+        btnSaveLlm.disabled = true;
+        try {
+          await request('llm.configure', payload);
+          llmApiKey.value = '';
+          llmSaveResult.textContent = 'Saved';
+          await refreshStatus();
+        } catch (e) {
+          llmSaveResult.textContent = 'Error: ' + (e?.message || e);
+        } finally {
+          updateButtons();
+        }
+      };
 
       btnCreateChannel.onclick = async () => {
         chCreateResult.textContent = '';
@@ -990,6 +1158,7 @@ export function getControlPlaneWebUIHtml(): string {
       // Initial state
       setConn('Disconnected');
       updateButtons();
+      updateLlmSettingsPlaceholder();
     </script>
   </body>
 </html>`;

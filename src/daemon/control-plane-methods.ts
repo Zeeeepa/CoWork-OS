@@ -17,8 +17,8 @@ import {
   TaskRepository,
   WorkspaceRepository,
 } from '../electron/database/repositories';
-import { LLMProviderFactory } from '../electron/agent/llm';
 import { SearchProviderFactory } from '../electron/agent/search';
+import { configureLlmFromControlPlaneParams, getControlPlaneLlmStatus } from '../electron/control-plane/llm-configure';
 import {
   getEnvSettingsImportModeFromArgsOrEnv,
   isHeadlessMode,
@@ -885,6 +885,12 @@ export function registerControlPlaneMethods(server: ControlPlaneServer, deps: Co
     return { ok: true };
   });
 
+  // LLM setup (headless-friendly credential/provider configuration).
+  server.registerMethod(Methods.LLM_CONFIGURE, async (client, params) => {
+    requireScope(client, 'admin');
+    return configureLlmFromControlPlaneParams(params);
+  });
+
   // Config/health (sanitized; no secrets).
   server.registerMethod(Methods.CONFIG_GET, async (client) => {
     requireScope(client, 'read');
@@ -907,12 +913,7 @@ export function registerControlPlaneMethods(server: ControlPlaneServer, deps: Co
       taskTotal += safeCount;
     }
 
-    const llmStatus = LLMProviderFactory.getConfigStatus();
-    const llm = {
-      currentProvider: llmStatus.currentProvider,
-      currentModel: llmStatus.currentModel,
-      providers: llmStatus.providers,
-    };
+    const llm = getControlPlaneLlmStatus();
     const anyLlmConfigured = llm.providers.some((p) => p.configured);
     const currentProviderConfigured =
       llm.providers.find((p) => p.type === llm.currentProvider)?.configured || false;
@@ -950,7 +951,7 @@ export function registerControlPlaneMethods(server: ControlPlaneServer, deps: Co
     }
     if (!anyLlmConfigured) {
       warnings.push(
-        'No LLM provider credentials configured. Set COWORK_IMPORT_ENV_SETTINGS=1 (or run with --import-env-settings) plus an API key (e.g. OPENAI_API_KEY), then restart.'
+        'No LLM provider credentials configured. Configure one via Control Plane (LLM Setup / llm.configure), or use COWORK_IMPORT_ENV_SETTINGS=1 with provider env vars and restart.'
       );
     } else if (!currentProviderConfigured) {
       warnings.push(

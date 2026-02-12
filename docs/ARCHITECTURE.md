@@ -111,6 +111,7 @@ Channel commands (chat):
 Attachment handling:
 - If an inbound channel message includes `attachments`, the gateway persists them under `<workspace>/.cowork/inbox/attachments/...`
 - The persisted workspace paths are appended into the task prompt so agents can inspect them with normal file tools (and `analyze_image` for images)
+- File extraction supports DOCX/PDF/PPTX content, and local image previews can optionally run OCR when `tesseract` is available
 
 Channel operational modes:
 - **Ambient mode**: When `ambientMode` is enabled on a channel config, all non-slash-command messages are ingested (persisted to the local message store) but NOT routed to the agent. Slash commands and pairing codes still pass through. Unauthorized messages are silently dropped (no error reply).
@@ -226,7 +227,7 @@ Docs:
 
 Web UI:
 - The control plane serves a built-in HTML dashboard at `/` (same host/port) for headless management.
-- Manage tasks, approvals, workspaces, and channels from a browser via SSH tunnel or Tailscale.
+- Manage LLM setup, tasks, approvals, workspaces, and channels from a browser via SSH tunnel or Tailscale.
 - Code: `src/electron/control-plane/web-ui.ts`
 
 Code:
@@ -253,6 +254,7 @@ Key methods (see `src/electron/control-plane/protocol.ts`):
 - Approvals (admin): `approval.list`, `approval.respond`
 - Channels: `channel.list`, `channel.get`
 - Channels (admin): `channel.create`, `channel.update`, `channel.test`, `channel.enable`, `channel.disable`, `channel.remove`
+- LLM setup (admin): `llm.configure`
 - Config/Health: `config.get` (sanitized, no secrets)
 
 Key events:

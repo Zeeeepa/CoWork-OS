@@ -346,7 +346,35 @@ node bin/coworkctl.js call channel.enable '{"channelId":"..."}'
 
 ## Configure LLM/Search Credentials (Headless)
 
-In desktop mode you’d normally configure providers in the Settings UI. On a VPS, you usually want to configure via env vars.
+You have two headless-friendly options:
+
+1. **Control Plane setup (recommended once running)**  
+   Use the Web UI **LLM Setup** panel or call `llm.configure` via `coworkctl`.
+2. **Env import on boot**  
+   Keep credentials in environment variables and import them at startup.
+
+### Option 1: Configure via Control Plane
+
+Examples:
+
+```bash
+# OpenAI
+node bin/coworkctl.js call llm.configure '{"providerType":"openai","apiKey":"sk-...","model":"gpt-4o-mini"}'
+
+# Ollama (remote/local URL)
+node bin/coworkctl.js call llm.configure '{"providerType":"ollama","settings":{"baseUrl":"http://127.0.0.1:11434"},"model":"gpt-oss:20b"}'
+
+# Azure OpenAI
+node bin/coworkctl.js call llm.configure '{"providerType":"azure","apiKey":"...","settings":{"endpoint":"https://...","deployment":"gpt-4.1-mini"}}'
+```
+
+Then verify:
+
+```bash
+node bin/coworkctl.js call config.get
+```
+
+### Option 2: Configure via env import
 
 CoWork OS supports an explicit, opt-in import path:
 
@@ -427,6 +455,7 @@ When the Control Plane server is running, it also serves a minimal web UI at:
 
 Open it in your browser, paste the Control Plane token, and you can:
 
+- Configure LLM provider credentials (LLM Setup)
 - List/create workspaces
 - Create tasks and send messages
 - View task events (recent history + live stream)

@@ -267,6 +267,7 @@ export const Methods = {
   STATUS: 'status',
   CONFIG_GET: 'config.get',
   CONFIG_SET: 'config.set',
+  LLM_CONFIGURE: 'llm.configure',
 
   // Workspace operations
   WORKSPACE_LIST: 'workspace.list',

@@ -122,7 +122,7 @@ You get a minimal **Web UI** (served by the daemon) plus a CLI. The full desktop
 Create a workspace (bootstrap or `workspace.create`), then `task.create`, then watch `task.event` (Web UI or `coworkctl`).
 
 **Where are credentials stored?**  
-In the encrypted settings store under the user data directory (see above). Headless deployments typically import from env vars at boot (`COWORK_IMPORT_ENV_SETTINGS=1`).
+In the encrypted settings store under the user data directory (see above). In headless mode you can set credentials via Control Plane (`llm.configure` / Web UI LLM Setup) or import from env vars at boot (`COWORK_IMPORT_ENV_SETTINGS=1`).
 
 **How do approvals work without a desktop UI?**  
 Approvals are visible and actionable over the Control Plane (Web UI + `approval.list` / `approval.respond`).

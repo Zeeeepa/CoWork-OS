@@ -37,6 +37,7 @@ describe('New Methods constants', () => {
   it('has config methods', () => {
     expect(Methods.CONFIG_GET).toBe('config.get');
     expect(Methods.CONFIG_SET).toBe('config.set');
+    expect(Methods.LLM_CONFIGURE).toBe('llm.configure');
   });
 
   it('has agent methods', () => {

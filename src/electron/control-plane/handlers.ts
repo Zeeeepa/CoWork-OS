@@ -26,8 +26,8 @@ import type { AgentDaemon } from '../agent/daemon';
 import type { DatabaseManager } from '../database/schema';
 import type { ChannelGateway } from '../gateway';
 import { ApprovalRepository, TaskEventRepository, TaskRepository, WorkspaceRepository } from '../database/repositories';
-import { LLMProviderFactory } from '../agent/llm';
 import { SearchProviderFactory } from '../agent/search';
+import { configureLlmFromControlPlaneParams, getControlPlaneLlmStatus } from './llm-configure';
 import { checkTailscaleAvailability, getExposureStatus } from '../tailscale';
 import { TailscaleSettingsManager } from '../tailscale/settings';
 import {
@@ -1042,6 +1042,12 @@ function registerTaskAndWorkspaceMethods(server: ControlPlaneServer, deps: Contr
     return { ok: true };
   });
 
+  // LLM setup (headless-friendly credential/provider configuration).
+  server.registerMethod(Methods.LLM_CONFIGURE, async (client, params) => {
+    requireScope(client, 'admin');
+    return configureLlmFromControlPlaneParams(params);
+  });
+
   // Config/health (sanitized; no secrets).
   server.registerMethod(Methods.CONFIG_GET, async (client) => {
     requireScope(client, 'read');
@@ -1064,12 +1070,7 @@ function registerTaskAndWorkspaceMethods(server: ControlPlaneServer, deps: Contr
       taskTotal += safeCount;
     }
 
-    const llmStatus = LLMProviderFactory.getConfigStatus();
-    const llm = {
-      currentProvider: llmStatus.currentProvider,
-      currentModel: llmStatus.currentModel,
-      providers: llmStatus.providers,
-    };
+    const llm = getControlPlaneLlmStatus();
     const anyLlmConfigured = llm.providers.some((p) => p.configured);
     const currentProviderConfigured =
       llm.providers.find((p) => p.type === llm.currentProvider)?.configured || false;
@@ -1107,7 +1108,7 @@ function registerTaskAndWorkspaceMethods(server: ControlPlaneServer, deps: Contr
     }
     if (!anyLlmConfigured) {
       warnings.push(
-        'No LLM provider credentials configured. Set COWORK_IMPORT_ENV_SETTINGS=1 (or run with --import-env-settings) plus an API key (e.g. OPENAI_API_KEY), then restart.'
+        'No LLM provider credentials configured. Configure one via Control Plane (LLM Setup / llm.configure), or use COWORK_IMPORT_ENV_SETTINGS=1 with provider env vars and restart.'
       );
     } else if (!currentProviderConfigured) {
       warnings.push(
