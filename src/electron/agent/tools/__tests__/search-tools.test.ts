@@ -75,6 +75,7 @@ describe('SearchTools', () => {
 
       expect(result.results).toHaveLength(1);
       expect(result.provider).toBe('tavily');
+      expect(result.success).toBe(true);
       expect(mockDaemon.logEvent).toHaveBeenCalledWith('test-task-id', 'tool_result', expect.any(Object));
     });
 
@@ -85,6 +86,8 @@ describe('SearchTools', () => {
 
       expect(result.results).toHaveLength(0);
       expect(result.provider).toBe('none');
+      expect(result.success).toBe(false);
+      expect(result.error).toBeDefined();
       expect(result.metadata?.notConfigured).toBe(true);
     });
 
@@ -96,6 +99,8 @@ describe('SearchTools', () => {
       const result = await searchTools.webSearch({ query: 'test query' });
 
       expect(result.results).toHaveLength(0);
+      expect(result.success).toBe(false);
+      expect(result.error).toBe('Rate limit exceeded');
       expect(result.metadata?.error).toBe('Rate limit exceeded');
       expect(mockDaemon.logEvent).toHaveBeenCalledWith(
         'test-task-id',

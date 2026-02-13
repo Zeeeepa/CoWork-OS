@@ -53,6 +53,10 @@ export interface SearchResponse {
   searchType: SearchType;
   totalResults?: number;
   provider: SearchProviderType | 'none';
+  // Optional execution status fields for tool-level circuit-breaker integration.
+  // Providers may omit these; SearchTools sets them for explicit failure signaling.
+  success?: boolean;
+  error?: string;
   // Optional metadata for additional info (e.g., errors, configuration status)
   metadata?: {
     error?: string;

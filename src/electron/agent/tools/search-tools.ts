@@ -40,16 +40,19 @@ export class SearchTools {
     if (!SearchProviderFactory.isAnyProviderConfigured()) {
       // Return a helpful response instead of throwing an error
       // This allows the LLM to inform the user gracefully
+      const errorMessage = 'Web search is not configured. To enable web search, please configure a search provider in Settings > Web Search. Supported providers: Tavily, Brave Search, SerpAPI, or Google Custom Search.';
       this.daemon.logEvent(this.taskId, 'log', {
         message: 'Web search is not available - no search provider configured',
       });
       return {
+        success: false,
+        error: errorMessage,
         query: input.query,
         searchType: input.searchType || 'web',
         results: [],
         provider: 'none',
         metadata: {
-          error: 'Web search is not configured. To enable web search, please configure a search provider in Settings > Web Search. Supported providers: Tavily, Brave Search, SerpAPI, or Google Custom Search.',
+          error: errorMessage,
           notConfigured: true,
         },
       };
@@ -66,13 +69,16 @@ export class SearchTools {
       SearchProviderFactory.clearCache();
       const reloadedSettings = SearchProviderFactory.loadSettings();
       if (!reloadedSettings.primaryProvider) {
+        const errorMessage = 'No search provider is selected. Please configure one in Settings > Web Search.';
         return {
+          success: false,
+          error: errorMessage,
           query: input.query,
           searchType: input.searchType || 'web',
           results: [],
           provider: 'none',
           metadata: {
-            error: 'No search provider is selected. Please configure one in Settings > Web Search.',
+            error: errorMessage,
             notConfigured: true,
           },
         };
@@ -107,7 +113,10 @@ export class SearchTools {
         },
       });
 
-      return response;
+      return {
+        ...response,
+        success: true,
+      };
     } catch (error: any) {
       const message = error?.message || 'Web search failed';
       this.daemon.logEvent(this.taskId, 'tool_result', {
@@ -116,6 +125,8 @@ export class SearchTools {
       });
 
       return {
+        success: false,
+        error: message,
         query: input.query,
         searchType: input.searchType || 'web',
         results: [],
