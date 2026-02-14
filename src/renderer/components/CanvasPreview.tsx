@@ -392,7 +392,9 @@ export function CanvasPreview({ session, onClose, forceSnapshot = false, onOpenB
           break;
 
         case 'content_pushed':
-          if (!isPaused && !isMinimized) {
+        case 'checkpoint_restored':
+          // Always refresh on explicit agent actions, even when auto-refresh is paused
+          if (!isMinimized) {
             setTimeout(() => {
               if (mountedRef.current && !snapshotInProgressRef.current) {
                 takeSnapshot(false, false);

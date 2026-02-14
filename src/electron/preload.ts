@@ -290,6 +290,11 @@ const IPC_CHANNELS = {
   CANVAS_OPEN_IN_BROWSER: 'canvas:openInBrowser',
   CANVAS_OPEN_URL: 'canvas:openUrl',
   CANVAS_GET_SESSION_DIR: 'canvas:getSessionDir',
+  CANVAS_CHECKPOINT_SAVE: 'canvas:checkpointSave',
+  CANVAS_CHECKPOINT_LIST: 'canvas:checkpointList',
+  CANVAS_CHECKPOINT_RESTORE: 'canvas:checkpointRestore',
+  CANVAS_CHECKPOINT_DELETE: 'canvas:checkpointDelete',
+  CANVAS_GET_CONTENT: 'canvas:getContent',
   // Mobile Companion Nodes
   NODE_LIST: 'node:list',
   NODE_GET: 'node:get',
@@ -684,7 +689,7 @@ interface CanvasA2UIAction {
 }
 
 interface CanvasEvent {
-  type: 'session_created' | 'session_updated' | 'session_closed' | 'content_pushed' | 'a2ui_action' | 'window_opened' | 'console_message';
+  type: 'session_created' | 'session_updated' | 'session_closed' | 'content_pushed' | 'a2ui_action' | 'window_opened' | 'console_message' | 'checkpoint_saved' | 'checkpoint_restored';
   sessionId: string;
   taskId: string;
   session?: CanvasSession;
@@ -716,6 +721,7 @@ interface BuiltinToolsSettings {
   toolOverrides: Record<string, { enabled: boolean; priority?: 'high' | 'normal' | 'low' }>;
   toolTimeouts: Record<string, number>;
   toolAutoApprove: Record<string, boolean>;
+  runCommandApprovalMode: 'per_command' | 'single_bundle';
   version: string;
 }
 
@@ -2031,6 +2037,16 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke(IPC_CHANNELS.CANVAS_OPEN_URL, data),
   canvasGetSessionDir: (sessionId: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.CANVAS_GET_SESSION_DIR, sessionId),
+  canvasCheckpointSave: (data: { sessionId: string; label?: string }) =>
+    ipcRenderer.invoke(IPC_CHANNELS.CANVAS_CHECKPOINT_SAVE, data),
+  canvasCheckpointList: (sessionId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.CANVAS_CHECKPOINT_LIST, sessionId),
+  canvasCheckpointRestore: (data: { sessionId: string; checkpointId: string }) =>
+    ipcRenderer.invoke(IPC_CHANNELS.CANVAS_CHECKPOINT_RESTORE, data),
+  canvasCheckpointDelete: (data: { sessionId: string; checkpointId: string }) =>
+    ipcRenderer.invoke(IPC_CHANNELS.CANVAS_CHECKPOINT_DELETE, data),
+  canvasGetContent: (sessionId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.CANVAS_GET_CONTENT, sessionId),
   onCanvasEvent: (callback: (event: CanvasEvent) => void) => {
     const subscription = (_: Electron.IpcRendererEvent, data: CanvasEvent) => callback(data);
     ipcRenderer.on(IPC_CHANNELS.CANVAS_EVENT, subscription);
@@ -2730,6 +2746,7 @@ export interface ElectronAPI {
     themeMode: 'light' | 'dark' | 'system';
     visualTheme: 'terminal' | 'warm' | 'oblivion';
     accentColor: 'cyan' | 'blue' | 'purple' | 'pink' | 'rose' | 'orange' | 'green' | 'teal' | 'coral';
+    language?: string;
     disclaimerAccepted?: boolean;
     onboardingCompleted?: boolean;
     onboardingCompletedAt?: string;
@@ -2739,6 +2756,7 @@ export interface ElectronAPI {
     themeMode?: 'light' | 'dark' | 'system';
     visualTheme?: 'terminal' | 'warm' | 'oblivion';
     accentColor?: 'cyan' | 'blue' | 'purple' | 'pink' | 'rose' | 'orange' | 'green' | 'teal' | 'coral';
+    language?: string;
     disclaimerAccepted?: boolean;
     onboardingCompleted?: boolean;
     onboardingCompletedAt?: string;
@@ -3005,6 +3023,11 @@ export interface ElectronAPI {
   canvasOpenInBrowser: (sessionId: string) => Promise<{ success: boolean; path: string }>;
   canvasOpenUrl: (data: { sessionId: string; url: string; show?: boolean }) => Promise<{ success: boolean; url: string }>;
   canvasGetSessionDir: (sessionId: string) => Promise<string | null>;
+  canvasCheckpointSave: (data: { sessionId: string; label?: string }) => Promise<{ id: string; label: string; createdAt: number }>;
+  canvasCheckpointList: (sessionId: string) => Promise<Array<{ id: string; label: string; createdAt: number }>>;
+  canvasCheckpointRestore: (data: { sessionId: string; checkpointId: string }) => Promise<{ id: string; label: string }>;
+  canvasCheckpointDelete: (data: { sessionId: string; checkpointId: string }) => Promise<{ success: boolean }>;
+  canvasGetContent: (sessionId: string) => Promise<Record<string, string>>;
   onCanvasEvent: (callback: (event: CanvasEvent) => void) => () => void;
 
   // Mobile Companion Nodes

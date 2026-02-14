@@ -19,6 +19,7 @@ interface BuiltinToolsSettingsData {
   toolOverrides: Record<string, { enabled: boolean; priority?: 'high' | 'normal' | 'low' }>;
   toolTimeouts: Record<string, number>;
   toolAutoApprove: Record<string, boolean>;
+  runCommandApprovalMode: 'per_command' | 'single_bundle';
   version: string;
 }
 
@@ -211,6 +212,26 @@ export function BuiltinToolsSettings() {
     }
   };
 
+  const handleRunCommandApprovalMode = async (mode: 'per_command' | 'single_bundle') => {
+    if (!settings) return;
+
+    const newSettings = {
+      ...settings,
+      runCommandApprovalMode: mode,
+    };
+
+    setSettings(newSettings);
+
+    try {
+      setSaving(true);
+      await window.electronAPI.saveBuiltinToolsSettings(newSettings);
+    } catch (error) {
+      console.error('Failed to save settings:', error);
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const handleRunCommandTimeout = async (value: string) => {
     if (!settings) return;
 
@@ -266,6 +287,9 @@ export function BuiltinToolsSettings() {
           const runCommandAutoApprove = category === 'shell'
             ? Boolean(settings.toolAutoApprove?.run_command)
             : false;
+          const runCommandApprovalMode = category === 'shell'
+            ? settings.runCommandApprovalMode
+            : 'per_command';
           const runCommandTimeout = category === 'shell'
             ? (settings.toolTimeouts?.run_command ?? '')
             : '';
@@ -333,6 +357,24 @@ export function BuiltinToolsSettings() {
 
               {category === 'shell' && expandedCategory === category && (
                 <div className="builtin-tool-advanced">
+                  <div className="builtin-tool-advanced-row">
+                    <div className="builtin-tool-advanced-text">
+                      <div className="builtin-tool-advanced-label">Approval mode</div>
+                      <div className="builtin-tool-advanced-hint">
+                        Per command asks each time. Single bundle asks once and reuses approval for safe commands in this task.
+                      </div>
+                    </div>
+                    <select
+                      className="builtin-tool-mode-select"
+                      value={runCommandApprovalMode}
+                      onChange={(e) => handleRunCommandApprovalMode(e.target.value as 'per_command' | 'single_bundle')}
+                      disabled={!config.enabled}
+                    >
+                      <option value="per_command">Per command</option>
+                      <option value="single_bundle">Single approval bundle</option>
+                    </select>
+                  </div>
+
                   <div className="builtin-tool-advanced-row">
                     <div className="builtin-tool-advanced-text">
                       <div className="builtin-tool-advanced-label">Auto-approve safe commands</div>

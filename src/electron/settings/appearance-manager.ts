@@ -163,9 +163,11 @@ export class AppearanceManager {
         themeMode: isValidThemeMode(settings.themeMode) ? settings.themeMode : existingSettings.themeMode,
         visualTheme: normalizedVisualTheme,
         accentColor: isValidAccentColor(settings.accentColor) ? settings.accentColor : existingSettings.accentColor,
+        language: settings.language ?? existingSettings.language,
         disclaimerAccepted: settings.disclaimerAccepted ?? existingSettings.disclaimerAccepted,
         onboardingCompleted: settings.onboardingCompleted ?? existingSettings.onboardingCompleted,
         onboardingCompletedAt: settings.onboardingCompletedAt ?? existingSettings.onboardingCompletedAt,
+        assistantName: settings.assistantName ?? existingSettings.assistantName,
       };
 
       const repository = SecureSettingsRepository.getInstance();

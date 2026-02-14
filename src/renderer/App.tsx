@@ -11,6 +11,7 @@ import { ToastContainer } from './components/Toast';
 import { QuickTaskFAB } from './components/QuickTaskFAB';
 import { NotificationPanel } from './components/NotificationPanel';
 import { Task, Workspace, TaskEvent, LLMModelInfo, LLMProviderInfo, UpdateInfo, ThemeMode, VisualTheme, AccentColor, QueueStatus, ToastNotification, isTempWorkspaceId } from '../shared/types';
+import { applyPersistedLanguage } from './i18n';
 
 
 // Helper to get effective theme based on system preference
@@ -137,6 +138,7 @@ export function App() {
         setThemeMode(settings.themeMode);
         setVisualTheme(settings.visualTheme || 'warm');
         setAccentColor(settings.accentColor);
+        applyPersistedLanguage(settings.language);
         setDisclaimerAccepted(settings.disclaimerAccepted ?? false);
         setOnboardingCompleted(settings.onboardingCompleted ?? false);
         setOnboardingCompletedAt(settings.onboardingCompletedAt);
@@ -373,6 +375,8 @@ export function App() {
         'executing': 'executing',
         'step_started': 'executing',
         'step_completed': 'executing',
+        'tool_call': 'executing',
+        'tool_result': 'executing',
         'task_completed': 'completed',
         'task_paused': 'paused',
         'approval_requested': 'blocked',
@@ -396,6 +400,28 @@ export function App() {
         setTasks(prev => prev.map(t =>
           t.id === event.taskId ? { ...t, status: newStatus } : t
         ));
+      }
+
+      if (event.type === 'workspace_permissions_updated') {
+        const payloadWorkspace = event.payload?.workspace as Workspace | undefined;
+        const payloadWorkspaceId = event.payload?.workspaceId as string | undefined;
+        const payloadPermissions = event.payload?.permissions as Workspace['permissions'] | undefined;
+        setCurrentWorkspace(prev => {
+          if (!prev) return prev;
+          if (payloadWorkspace && payloadWorkspace.id === prev.id) {
+            return payloadWorkspace;
+          }
+          if (payloadWorkspaceId && payloadWorkspaceId === prev.id && payloadPermissions) {
+            return {
+              ...prev,
+              permissions: {
+                ...prev.permissions,
+                ...payloadPermissions,
+              },
+            };
+          }
+          return prev;
+        });
       }
 
       if (event.type === 'approval_granted') {
@@ -615,6 +641,23 @@ export function App() {
     if (!selectedTaskId) return;
 
     try {
+      const lower = message.toLowerCase().trim();
+      const enableShellIntent =
+        /^(?:yes|yep|yeah|sure|ok|okay|please do|do it)[.!]?$/.test(lower) ||
+        /\b(?:enable|turn on|allow|grant)\b[\s\S]{0,20}\bshell\b/.test(lower) ||
+        /\bshell\b[\s\S]{0,20}\b(?:on|enable|enabled)\b/.test(lower);
+
+      if (enableShellIntent && currentWorkspace && !currentWorkspace.permissions.shell) {
+        try {
+          const updatedWorkspace = await window.electronAPI.updateWorkspacePermissions(currentWorkspace.id, { shell: true });
+          if (updatedWorkspace) {
+            setCurrentWorkspace(updatedWorkspace);
+          }
+        } catch (permissionError) {
+          console.error('Failed to pre-enable shell from user message:', permissionError);
+        }
+      }
+
       await window.electronAPI.sendMessage(selectedTaskId, message);
     } catch (error: unknown) {
       console.error('Failed to send message:', error);

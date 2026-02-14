@@ -276,6 +276,8 @@ export function MissionControlPanel({ onClose: _onClose }: MissionControlPanelPr
         executing: 'executing',
         step_started: 'executing',
         step_completed: 'executing',
+        tool_call: 'executing',
+        tool_result: 'executing',
         task_completed: 'completed',
         task_paused: 'paused',
         approval_requested: 'blocked',

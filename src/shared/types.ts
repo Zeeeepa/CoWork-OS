@@ -9,6 +9,7 @@ export interface AppearanceSettings {
   themeMode: ThemeMode;
   visualTheme: VisualTheme;
   accentColor: AccentColor;
+  language?: string; // Persisted language preference (e.g. 'en', 'ja', 'zh')
   disclaimerAccepted?: boolean;
   onboardingCompleted?: boolean;
   onboardingCompletedAt?: string; // ISO timestamp of when onboarding was completed
@@ -124,6 +125,7 @@ export type EventType =
   | 'follow_up_completed'
   | 'follow_up_failed'
   | 'tool_warning'
+  | 'workspace_permissions_updated'
   | 'user_message'
   | 'user_feedback'
   | 'command_output'
@@ -1947,6 +1949,11 @@ export const IPC_CHANNELS = {
   CANVAS_OPEN_IN_BROWSER: 'canvas:openInBrowser',
   CANVAS_OPEN_URL: 'canvas:openUrl',
   CANVAS_GET_SESSION_DIR: 'canvas:getSessionDir',
+  CANVAS_CHECKPOINT_SAVE: 'canvas:checkpointSave',
+  CANVAS_CHECKPOINT_LIST: 'canvas:checkpointList',
+  CANVAS_CHECKPOINT_RESTORE: 'canvas:checkpointRestore',
+  CANVAS_CHECKPOINT_DELETE: 'canvas:checkpointDelete',
+  CANVAS_GET_CONTENT: 'canvas:getContent',
 
   // Mobile Companion Nodes
   NODE_LIST: 'node:list',
@@ -3588,7 +3595,7 @@ export interface CanvasA2UIAction {
  */
 export interface CanvasEvent {
   /** Event type */
-  type: 'session_created' | 'session_updated' | 'session_closed' | 'content_pushed' | 'a2ui_action' | 'window_opened' | 'console_message';
+  type: 'session_created' | 'session_updated' | 'session_closed' | 'content_pushed' | 'a2ui_action' | 'window_opened' | 'console_message' | 'checkpoint_saved' | 'checkpoint_restored';
   /** Session ID */
   sessionId: string;
   /** Associated task ID */
@@ -3602,6 +3609,8 @@ export interface CanvasEvent {
     level: 'log' | 'warn' | 'error' | 'info';
     message: string;
   };
+  /** Checkpoint data (for checkpoint events) */
+  checkpoint?: { id: string; label: string };
   /** Timestamp */
   timestamp: number;
 }
@@ -3640,6 +3649,23 @@ export interface CanvasSnapshot {
   width: number;
   /** Image height */
   height: number;
+}
+
+/**
+ * Canvas checkpoint — a named snapshot of canvas file state
+ * that can be restored to revert the canvas to a known good state
+ */
+export interface CanvasCheckpoint {
+  /** Unique checkpoint identifier */
+  id: string;
+  /** Session ID this checkpoint belongs to */
+  sessionId: string;
+  /** Human-readable label */
+  label: string;
+  /** File contents at checkpoint time (filename → content) */
+  files: Record<string, string>;
+  /** Timestamp when checkpoint was created */
+  createdAt: number;
 }
 
 // ============ Agent Personality Types ============

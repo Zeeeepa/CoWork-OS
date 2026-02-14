@@ -6,6 +6,7 @@ import { Task, TaskEvent, Workspace, ApprovalRequest, LLMModelInfo, CustomSkill,
 import { isVerificationStepDescription } from '../../shared/plan-utils';
 import type { AgentRoleData } from '../../electron/preload';
 import { useVoiceInput } from '../hooks/useVoiceInput';
+import { useVoiceTalkMode } from '../hooks/useVoiceTalkMode';
 import { useAgentContext, type AgentContext } from '../hooks/useAgentContext';
 import { getMessage } from '../utils/agentMessages';
 import {
@@ -23,6 +24,16 @@ const VERBOSE_STEPS_KEY = 'cowork:verboseSteps';
 const TASK_TITLE_MAX_LENGTH = 50;
 const TITLE_ELLIPSIS_REGEX = /(\.\.\.|\u2026)$/u;
 const MAX_ATTACHMENTS = 10;
+const ACTIVE_WORK_SIGNAL_WINDOW_MS = 30_000;
+const ACTIVE_WORK_EVENT_TYPES: EventType[] = [
+  'executing',
+  'step_started',
+  'step_completed',
+  'tool_call',
+  'tool_result',
+  'verification_started',
+  'retry_started',
+];
 
 // Important event types shown in non-verbose mode
 // These are high-level steps that represent meaningful progress
@@ -985,6 +996,21 @@ export function MainContent({ task, selectedTaskId, workspace, events, onSendMes
       setShowVoiceNotConfigured(true);
     },
   });
+
+  // Talk Mode hook - continuous voice conversation
+  const talkMode = useVoiceTalkMode({
+    onSendMessage: (text) => {
+      if (!selectedTaskId && onCreateTask) {
+        const title = text.length > 60 ? text.slice(0, 57) + '...' : text;
+        onCreateTask(title, text);
+      } else {
+        onSendMessage(text);
+      }
+    },
+    onError: (error) => {
+      console.error('Talk mode error:', error);
+    },
+  });
   const [viewerFilePath, setViewerFilePath] = useState<string | null>(null);
   const markdownComponents = useMemo(
     () => buildMarkdownComponents({ workspacePath: workspace?.path, onOpenViewer: setViewerFilePath }),
@@ -1024,6 +1050,41 @@ export function MainContent({ task, selectedTaskId, workspace, events, onSendMes
     }
     return null;
   }, [events]);
+
+  const isTaskWorking = useMemo(() => {
+    if (!task) return false;
+    if (task.status === 'executing') return true;
+    if (task.status === 'paused' || task.status === 'blocked' || task.status === 'failed' || task.status === 'cancelled') {
+      return false;
+    }
+
+    const now = Date.now();
+    for (let i = events.length - 1; i >= 0; i--) {
+      const event = events[i];
+      if (event.taskId !== task.id) continue;
+
+      if (
+        event.type === 'task_paused' ||
+        event.type === 'approval_requested' ||
+        event.type === 'task_completed' ||
+        event.type === 'task_cancelled' ||
+        event.type === 'error'
+      ) {
+        return false;
+      }
+
+      const isActiveProgressSignal = event.type === 'progress_update' && (
+        event.payload?.phase === 'tool_execution' ||
+        event.payload?.state === 'active' ||
+        event.payload?.heartbeat === true
+      );
+      if (ACTIVE_WORK_EVENT_TYPES.includes(event.type) || isActiveProgressSignal) {
+        return now - event.timestamp <= ACTIVE_WORK_SIGNAL_WINDOW_MS;
+      }
+    }
+
+    return false;
+  }, [task, events]);
 
   const latestCanvasSessionId = useMemo(() => {
     if (canvasSessions.length === 0) return null;
@@ -1287,7 +1348,12 @@ export function MainContent({ task, selectedTaskId, workspace, events, onSendMes
     const newValue = !shellEnabled;
     setShellEnabled(newValue);
     try {
-      await window.electronAPI.updateWorkspacePermissions(workspace.id, { shell: newValue });
+      const updatedWorkspace = await window.electronAPI.updateWorkspacePermissions(workspace.id, { shell: newValue });
+      if (updatedWorkspace) {
+        setShellEnabled(updatedWorkspace?.permissions?.shell ?? newValue);
+        onSelectWorkspace?.(updatedWorkspace);
+        setWorkspacesList(prev => prev.map((item) => item.id === updatedWorkspace.id ? updatedWorkspace : item));
+      }
     } catch (err) {
       console.error('Failed to update shell permission:', err);
       setShellEnabled(!newValue); // Revert on error
@@ -1427,7 +1493,7 @@ export function MainContent({ task, selectedTaskId, workspace, events, onSendMes
 
   const timelineRef = useRef<HTMLDivElement>(null);
   const mainBodyRef = useRef<HTMLDivElement>(null);
-  const prevTaskStatusRef = useRef<Task['status'] | undefined>(undefined);
+  const prevTaskBusyRef = useRef<boolean>(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const mentionContainerRef = useRef<HTMLDivElement>(null);
   const mentionDropdownRef = useRef<HTMLDivElement>(null);
@@ -1493,19 +1559,22 @@ export function MainContent({ task, selectedTaskId, workspace, events, onSendMes
     setAutoScroll(true);
   }, [task?.id]);
 
+  useEffect(() => {
+    prevTaskBusyRef.current = false;
+  }, [task?.id]);
+
   // Send queued message when task finishes executing
   useEffect(() => {
-    const prevStatus = prevTaskStatusRef.current;
-    const currentStatus = task?.status;
+    const wasBusy = prevTaskBusyRef.current;
 
-    // If task was executing and now it's not, send the queued message
-    if (prevStatus === 'executing' && currentStatus !== 'executing' && queuedMessage) {
+    // If task was actively working and now it's idle, send the queued message.
+    if (wasBusy && !isTaskWorking && queuedMessage) {
       onSendMessage(queuedMessage);
       setQueuedMessage(null);
     }
 
-    prevTaskStatusRef.current = currentStatus;
-  }, [task?.status, queuedMessage, onSendMessage]);
+    prevTaskBusyRef.current = isTaskWorking;
+  }, [isTaskWorking, queuedMessage, onSendMessage]);
 
   // Process command_output events to track live command execution
   useEffect(() => {
@@ -2553,6 +2622,17 @@ export function MainContent({ task, selectedTaskId, workspace, events, onSendMes
       <div className="main-header">
         <div className="main-header-title" title={headerTooltip}>{headerTitle}</div>
       </div>
+      {isTaskWorking && (
+        <div className="main-header-status">
+          <span className="chat-status executing">
+            <svg className="spinner" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <circle cx="12" cy="12" r="10" strokeOpacity="0.25" />
+              <path d="M12 2a10 10 0 0 1 10 10" strokeLinecap="round" />
+            </svg>
+            {agentContext.getMessage('taskWorking')}
+          </span>
+        </div>
+      )}
 
       {/* Body */}
       <div className="main-body" ref={mainBodyRef} onScroll={handleScroll}>
@@ -2664,7 +2744,7 @@ export function MainContent({ task, selectedTaskId, workspace, events, onSendMes
                               {task.status === 'completed' && <span className="chat-status">{agentContext.getMessage('taskComplete')}</span>}
                               {task.status === 'paused' && <span className="chat-status">Waiting for your direction</span>}
                               {task.status === 'blocked' && <span className="chat-status">{agentContext.getMessage('taskBlocked') || 'Needs approval'}</span>}
-                              {task.status === 'executing' && (
+                              {isTaskWorking && (
                                 <span className="chat-status executing">
                                   <svg className="spinner" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                                     <circle cx="12" cy="12" r="10" strokeOpacity="0.25" />
@@ -2900,11 +2980,12 @@ export function MainContent({ task, selectedTaskId, workspace, events, onSendMes
               <button
                 className={`voice-input-btn ${voiceInput.state}`}
                 onClick={voiceInput.toggleRecording}
-                disabled={voiceInput.state === 'processing'}
+                disabled={voiceInput.state === 'processing' || talkMode.isActive}
                 title={
-                  voiceInput.state === 'idle' ? 'Start voice input' :
-                    voiceInput.state === 'recording' ? 'Stop recording' :
-                      'Processing...'
+                  talkMode.isActive ? 'Talk Mode active' :
+                    voiceInput.state === 'idle' ? 'Start voice input' :
+                      voiceInput.state === 'recording' ? 'Stop recording' :
+                        'Processing...'
                 }
               >
                 {voiceInput.state === 'processing' ? (
@@ -2929,6 +3010,40 @@ export function MainContent({ task, selectedTaskId, workspace, events, onSendMes
                 )}
               </button>
               <button
+                className={`voice-input-btn talk-mode-btn ${talkMode.isActive ? 'active' : ''} ${talkMode.state}`}
+                onClick={talkMode.toggle}
+                title={
+                  talkMode.isActive
+                    ? `Talk Mode ON (${talkMode.inputMode === 'push_to_talk' ? 'hold Space to talk' : 'voice activity'}) — click to stop`
+                    : 'Start Talk Mode — continuous voice conversation'
+                }
+              >
+                {talkMode.state === 'listening' ? (
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" />
+                    <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
+                    <circle cx="12" cy="12" r="10" strokeDasharray="4 2" />
+                  </svg>
+                ) : talkMode.state === 'speaking' ? (
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
+                    <path d="M15.54 8.46a5 5 0 0 1 0 7.07" />
+                    <path d="M19.07 4.93a10 10 0 0 1 0 14.14" />
+                  </svg>
+                ) : (
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" />
+                    <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
+                    <path d="M8 21h8" />
+                    <path d="M12 17v4" />
+                    <circle cx="12" cy="12" r="10" strokeDasharray="4 2" />
+                  </svg>
+                )}
+                {talkMode.isActive && talkMode.state === 'listening' && (
+                  <span className="voice-recording-indicator" style={{ width: `${talkMode.audioLevel}%` }} />
+                )}
+              </button>
+              <button
                 className="lets-go-btn lets-go-btn-sm"
                 onClick={handleSend}
                 disabled={(!inputValue.trim() && pendingAttachments.length === 0) || isUploadingAttachments || isPreparingMessage}
@@ -2938,7 +3053,7 @@ export function MainContent({ task, selectedTaskId, workspace, events, onSendMes
                   <path d="M12 19V5M5 12l7-7 7 7" />
                 </svg>
               </button>
-              {task.status === 'executing' && onStopTask && (
+              {isTaskWorking && onStopTask && (
                 <button
                   className="stop-btn-simple"
                   onClick={onStopTask}

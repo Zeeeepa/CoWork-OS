@@ -1,4 +1,11 @@
+import { useTranslation } from 'react-i18next';
 import { ThemeMode, AccentColor, VisualTheme, ACCENT_COLORS } from '../../shared/types';
+import {
+  SUPPORTED_LANGUAGES,
+  LANGUAGE_NAMES,
+  changeLanguage,
+  type SupportedLanguage,
+} from '../i18n';
 
 interface AppearanceSettingsProps {
   themeMode: ThemeMode;
@@ -21,6 +28,8 @@ export function AppearanceSettings({
   onShowOnboarding,
   onboardingCompletedAt,
 }: AppearanceSettingsProps) {
+  const { t, i18n } = useTranslation();
+  const currentLanguage = (i18n.language?.split('-')[0] || 'en') as SupportedLanguage;
   const isModernVisualTheme = visualTheme === 'warm' || visualTheme === 'oblivion';
   const formatCompletedDate = (isoString?: string) => {
     if (!isoString) return null;
@@ -69,7 +78,7 @@ export function AppearanceSettings({
 
       {/* Visual Style */}
       <div className="appearance-section">
-        <h4>Visual Style</h4>
+        <h4>Visual style</h4>
         <div className="theme-switcher">
           <button
             className={`theme-option ${visualTheme === 'terminal' ? 'selected' : ''}`}
@@ -99,12 +108,23 @@ export function AppearanceSettings({
 
       {/* Theme Mode */}
       <div className="appearance-section">
-        <h4>Color Mode</h4>
+        <h4>Color mode</h4>
         <div className="theme-switcher">
           <button
             className={`theme-option ${themeMode === 'light' ? 'selected' : ''}`}
             onClick={() => onThemeChange('light')}
           >
+            <svg className="theme-option-icon" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+              <circle cx="12" cy="12" r="5" />
+              <line x1="12" y1="1" x2="12" y2="3" />
+              <line x1="12" y1="21" x2="12" y2="23" />
+              <line x1="4.22" y1="4.22" x2="5.64" y2="5.64" />
+              <line x1="18.36" y1="18.36" x2="19.78" y2="19.78" />
+              <line x1="1" y1="12" x2="3" y2="12" />
+              <line x1="21" y1="12" x2="23" y2="12" />
+              <line x1="4.22" y1="19.78" x2="5.64" y2="18.36" />
+              <line x1="18.36" y1="5.64" x2="19.78" y2="4.22" />
+            </svg>
             <div className="theme-option-preview light">
               <div className="theme-option-preview-line" />
               <div className="theme-option-preview-line" />
@@ -117,6 +137,9 @@ export function AppearanceSettings({
             className={`theme-option ${themeMode === 'dark' ? 'selected' : ''}`}
             onClick={() => onThemeChange('dark')}
           >
+            <svg className="theme-option-icon" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
+            </svg>
             <div className="theme-option-preview dark">
               <div className="theme-option-preview-line" />
               <div className="theme-option-preview-line" />
@@ -129,25 +152,56 @@ export function AppearanceSettings({
             className={`theme-option ${themeMode === 'system' ? 'selected' : ''}`}
             onClick={() => onThemeChange('system')}
           >
+            <svg className="theme-option-icon" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+              <rect x="2" y="3" width="20" height="14" rx="2" ry="2" />
+              <line x1="8" y1="21" x2="16" y2="21" />
+              <line x1="12" y1="17" x2="12" y2="21" />
+            </svg>
             <div className="theme-option-preview system" />
-            <span className="theme-option-label">System</span>
-            <span className="system-badge">Auto</span>
+            <span className="theme-option-label">System <span className="theme-option-sublabel">(Auto)</span></span>
           </button>
         </div>
       </div>
 
       {/* Accent Color */}
       <div className="appearance-section">
-        <h4>Accent Color</h4>
-        <div className="color-grid">
+        <h4>Accent color</h4>
+        <div className="color-swatch-strip">
           {ACCENT_COLORS.map((color) => (
             <button
               key={color.id}
-              className={`color-option ${accentColor === color.id ? 'selected' : ''}`}
+              className={`color-swatch-btn ${accentColor === color.id ? 'selected' : ''}`}
               onClick={() => onAccentChange(color.id)}
+              aria-label={color.label}
+              aria-pressed={accentColor === color.id}
             >
-              <div className={`color-swatch ${color.id}`} />
-              <span className="color-label">{color.label}</span>
+              <div className={`color-swatch ${color.id}`}>
+                {accentColor === color.id && (
+                  <svg className="color-check" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                    <polyline points="20 6 9 17 4 12" />
+                  </svg>
+                )}
+              </div>
+            </button>
+          ))}
+        </div>
+        <span className="color-swatch-selected-label">
+          {ACCENT_COLORS.find((c) => c.id === accentColor)?.label}
+        </span>
+      </div>
+
+      {/* Language */}
+      <div className="appearance-section">
+        <h4>{t('settings.language.title')}</h4>
+        <p className="settings-description">{t('settings.language.description')}</p>
+        <div className="theme-switcher">
+          {SUPPORTED_LANGUAGES.map((lang) => (
+            <button
+              key={lang}
+              className={`theme-option ${currentLanguage === lang ? 'selected' : ''}`}
+              onClick={() => changeLanguage(lang)}
+            >
+              <span className="theme-option-label">{LANGUAGE_NAMES[lang]}</span>
             </button>
           ))}
         </div>

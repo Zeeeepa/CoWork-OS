@@ -1,0 +1,228 @@
+{
+  "common": {
+    "save": "\u4fdd\u5b58",
+    "cancel": "\u53d6\u6d88",
+    "close": "\u5173\u95ed",
+    "delete": "\u5220\u9664",
+    "edit": "\u7f16\u8f91",
+    "create": "\u521b\u5efa",
+    "confirm": "\u786e\u8ba4",
+    "loading": "\u52a0\u8f7d\u4e2d...",
+    "error": "\u9519\u8bef",
+    "success": "\u6210\u529f",
+    "retry": "\u91cd\u8bd5",
+    "back": "\u8fd4\u56de",
+    "next": "\u4e0b\u4e00\u6b65",
+    "done": "\u5b8c\u6210",
+    "search": "\u641c\u7d22",
+    "filter": "\u7b5b\u9009",
+    "refresh": "\u5237\u65b0",
+    "copy": "\u590d\u5236",
+    "paste": "\u7c98\u8d34",
+    "clear": "\u6e05\u9664",
+    "enable": "\u542f\u7528",
+    "disable": "\u7981\u7528",
+    "enabled": "\u5df2\u542f\u7528",
+    "disabled": "\u5df2\u7981\u7528",
+    "settings": "\u8bbe\u7f6e",
+    "none": "\u65e0",
+    "all": "\u5168\u90e8",
+    "yes": "\u662f",
+    "no": "\u5426",
+    "ok": "\u786e\u5b9a",
+    "apply": "\u5e94\u7528",
+    "reset": "\u91cd\u7f6e",
+    "export": "\u5bfc\u51fa",
+    "import": "\u5bfc\u5165"
+  },
+  "sidebar": {
+    "newTask": "\u65b0\u5efa\u4efb\u52a1",
+    "tasks": "\u4efb\u52a1",
+    "missionControl": "\u4efb\u52a1\u63a7\u5236\u4e2d\u5fc3",
+    "taskBoard": "\u4efb\u52a1\u770b\u677f",
+    "activity": "\u6d3b\u52a8",
+    "schedule": "\u8ba1\u5212",
+    "standups": "\u7ad9\u4f1a",
+    "settings": "\u8bbe\u7f6e"
+  },
+  "task": {
+    "create": "\u521b\u5efa\u4efb\u52a1",
+    "title": "\u4efb\u52a1\u6807\u9898",
+    "prompt": "\u60a8\u5e0c\u671b\u667a\u80fd\u4f53\u5904\u7406\u4ec0\u4e48\uff1f",
+    "status": {
+      "pending": "\u7b49\u5f85\u4e2d",
+      "running": "\u8fd0\u884c\u4e2d",
+      "completed": "\u5df2\u5b8c\u6210",
+      "failed": "\u5931\u8d25",
+      "cancelled": "\u5df2\u53d6\u6d88",
+      "paused": "\u5df2\u6682\u505c",
+      "blocked": "\u5df2\u963b\u585e"
+    },
+    "priority": {
+      "label": "\u4f18\u5148\u7ea7",
+      "low": "\u4f4e",
+      "medium": "\u4e2d",
+      "high": "\u9ad8",
+      "urgent": "\u7d27\u6025"
+    },
+    "actions": {
+      "cancel": "\u53d6\u6d88\u4efb\u52a1",
+      "pause": "\u6682\u505c\u4efb\u52a1",
+      "resume": "\u6062\u590d\u4efb\u52a1",
+      "retry": "\u91cd\u8bd5\u4efb\u52a1",
+      "delete": "\u5220\u9664\u4efb\u52a1",
+      "duplicate": "\u590d\u5236\u4efb\u52a1",
+      "assign": "\u5206\u914d\u667a\u80fd\u4f53",
+      "sendMessage": "\u53d1\u9001\u6d88\u606f"
+    },
+    "empty": {
+      "title": "\u8fd8\u6ca1\u6709\u4efb\u52a1",
+      "body": "\u521b\u5efa\u4e00\u4e2a\u65b0\u4efb\u52a1\u5f00\u59cb\u5427\u3002"
+    },
+    "board": {
+      "title": "\u4efb\u52a1\u770b\u677f",
+      "loading": "\u52a0\u8f7d\u4efb\u52a1\u4e2d...",
+      "count": "{{count}} \u4e2a\u4efb\u52a1",
+      "allAgents": "\u6240\u6709\u667a\u80fd\u4f53",
+      "allLabels": "\u6240\u6709\u6807\u7b7e",
+      "allPriorities": "\u6240\u6709\u4f18\u5148\u7ea7",
+      "manageLabels": "\u7ba1\u7406\u6807\u7b7e",
+      "emptyTitle": "\u672a\u627e\u5230\u4efb\u52a1",
+      "emptyHint": "\u521b\u5efa\u4e00\u4e2a\u4efb\u52a1\u5f00\u59cb\u5427\u3002"
+    }
+  },
+  "agent": {
+    "status": {
+      "online": "\u5728\u7ebf",
+      "offline": "\u79bb\u7ebf",
+      "busy": "\u5fd9\u788c",
+      "idle": "\u7a7a\u95f2"
+    },
+    "wake": "\u5524\u9192\u667a\u80fd\u4f53",
+    "noActiveTask": "\u6ca1\u6709\u6d3b\u52a8\u4efb\u52a1",
+    "unassigned": "\u672a\u5206\u914d"
+  },
+  "workspace": {
+    "title": "\u5de5\u4f5c\u533a",
+    "select": "\u9009\u62e9\u5de5\u4f5c\u533a",
+    "create": "\u521b\u5efa\u5de5\u4f5c\u533a",
+    "default": "\u9ed8\u8ba4\u5de5\u4f5c\u533a"
+  },
+  "missionControl": {
+    "title": "\u4efb\u52a1\u63a7\u5236\u4e2d\u5fc3",
+    "loading": "\u52a0\u8f7d\u4efb\u52a1\u63a7\u5236\u4e2d\u5fc3...",
+    "agentsActive": "\u6d3b\u52a8\u667a\u80fd\u4f53",
+    "tasksQueue": "\u961f\u5217\u4e2d\u4efb\u52a1",
+    "agents": "\u667a\u80fd\u4f53",
+    "addAgent": "\u6dfb\u52a0\u667a\u80fd\u4f53",
+    "liveFeed": "\u5b9e\u65f6\u52a8\u6001",
+    "allAgents": "\u6240\u6709\u667a\u80fd\u4f53",
+    "feedEmpty": "\u8fd8\u6ca1\u6709\u6d3b\u52a8",
+    "columnEmpty": "\u8fd8\u6ca1\u6709\u5185\u5bb9",
+    "filter": {
+      "all": "\u5168\u90e8",
+      "tasks": "\u4efb\u52a1",
+      "comments": "\u8bc4\u8bba",
+      "status": "\u72b6\u6001"
+    }
+  },
+  "canvas": {
+    "title": "\u5b9e\u65f6\u753b\u5e03",
+    "loading": "\u52a0\u8f7d\u753b\u5e03\u4e2d...",
+    "paused": "\u5df2\u6682\u505c",
+    "live": "\u5b9e\u65f6",
+    "closed": "\u5df2\u5173\u95ed",
+    "history": "\u5386\u53f2",
+    "console": "\u63a7\u5236\u53f0",
+    "interactive": "\u4ea4\u4e92\u6a21\u5f0f",
+    "snapshot": "\u622a\u56fe",
+    "copyClipboard": "\u590d\u5236\u5230\u526a\u8d34\u677f",
+    "savePng": "\u4fdd\u5b58\u4e3aPNG",
+    "exportHtml": "\u5bfc\u51faHTML",
+    "openBrowser": "\u5728\u6d4f\u89c8\u5668\u4e2d\u6253\u5f00",
+    "openWindow": "\u5728\u7a97\u53e3\u4e2d\u6253\u5f00",
+    "showFolder": "\u5728\u8bbf\u8fbe\u4e2d\u663e\u793a",
+    "refreshRate": "\u5237\u65b0\u7387",
+    "manual": "\u624b\u52a8",
+    "checkpoint": {
+      "save": "\u4fdd\u5b58\u68c0\u67e5\u70b9",
+      "restore": "\u6062\u590d\u68c0\u67e5\u70b9",
+      "list": "\u68c0\u67e5\u70b9",
+      "saved": "\u68c0\u67e5\u70b9\u5df2\u4fdd\u5b58",
+      "restored": "\u68c0\u67e5\u70b9\u5df2\u6062\u590d"
+    }
+  },
+  "settings": {
+    "title": "\u8bbe\u7f6e",
+    "general": "\u5e38\u89c4",
+    "appearance": "\u5916\u89c2",
+    "llm": "AI\u6a21\u578b",
+    "channels": "\u6e20\u9053",
+    "integrations": "\u96c6\u6210",
+    "extensions": "\u6269\u5c55",
+    "security": "\u5b89\u5168",
+    "advanced": "\u9ad8\u7ea7\u8bbe\u7f6e",
+    "about": "\u5173\u4e8e",
+    "language": {
+      "title": "\u8bed\u8a00",
+      "description": "\u9009\u62e9\u754c\u9762\u663e\u793a\u8bed\u8a00\u3002",
+      "system": "\u7cfb\u7edf\u9ed8\u8ba4",
+      "en": "English",
+      "ja": "\u65e5\u672c\u8a9e",
+      "zh": "\u4e2d\u6587\uff08\u7b80\u4f53\uff09"
+    },
+    "theme": {
+      "title": "\u4e3b\u9898",
+      "light": "\u6d45\u8272",
+      "dark": "\u6df1\u8272",
+      "system": "\u7cfb\u7edf"
+    }
+  },
+  "activity": {
+    "title": "\u6d3b\u52a8",
+    "loading": "\u52a0\u8f7d\u6d3b\u52a8\u4e2d...",
+    "markAllRead": "\u5168\u90e8\u6807\u4e3a\u5df2\u8bfb",
+    "allTypes": "\u6240\u6709\u7c7b\u578b",
+    "allActors": "\u6240\u6709\u53c2\u4e0e\u8005",
+    "agent": "\u667a\u80fd\u4f53",
+    "user": "\u7528\u6237",
+    "system": "\u7cfb\u7edf",
+    "unreadOnly": "\u4ec5\u672a\u8bfb",
+    "pinned": "\u5df2\u7f6e\u9876",
+    "recent": "\u6700\u8fd1",
+    "emptyTitle": "\u8fd8\u6ca1\u6709\u6d3b\u52a8",
+    "emptyHint": "\u4efb\u52a1\u521b\u5efa\u548c\u6267\u884c\u65f6\uff0c\u6d3b\u52a8\u5c06\u663e\u793a\u5728\u8fd9\u91cc\u3002"
+  },
+  "standup": {
+    "title": "\u7ad9\u4f1a\u62a5\u544a",
+    "generate": "\u751f\u6210\u62a5\u544a",
+    "generating": "\u751f\u6210\u4e2d...",
+    "historyTitle": "\u62a5\u544a\u5386\u53f2",
+    "empty": "\u8fd8\u6ca1\u6709\u7ad9\u4f1a\u62a5\u544a",
+    "loading": "\u52a0\u8f7d\u62a5\u544a\u4e2d...",
+    "completed": "\u5df2\u5b8c\u6210",
+    "inProgress": "\u8fdb\u884c\u4e2d",
+    "blocked": "\u5df2\u963b\u585e"
+  },
+  "voice": {
+    "talkMode": "\u5bf9\u8bdd\u6a21\u5f0f",
+    "listening": "\u6b63\u5728\u7535\u542c...",
+    "processing": "\u5904\u7406\u4e2d...",
+    "pushToTalk": "\u6309\u952e\u8bf4\u8bdd",
+    "wakeWord": "\u5524\u9192\u8bcd",
+    "continuous": "\u8fde\u7eed"
+  },
+  "notifications": {
+    "title": "\u901a\u77e5",
+    "empty": "\u6ca1\u6709\u901a\u77e5",
+    "clearAll": "\u6e05\u9664\u5168\u90e8",
+    "markRead": "\u6807\u4e3a\u5df2\u8bfb"
+  },
+  "errors": {
+    "generic": "\u51fa\u4e86\u70b9\u95ee\u9898\uff0c\u8bf7\u91cd\u8bd5\u3002",
+    "network": "\u7f51\u7edc\u9519\u8bef\uff0c\u8bf7\u68c0\u67e5\u8fde\u63a5\u3002",
+    "timeout": "\u8bf7\u6c42\u8d85\u65f6\uff0c\u8bf7\u91cd\u8bd5\u3002",
+    "unauthorized": "\u9700\u8981\u8eab\u4efd\u9a8c\u8bc1\u3002",
+    "notFound": "\u672a\u627e\u5230\u8d44\u6e90\u3002"
+  }
+}
