@@ -42,28 +42,63 @@ jobs:
       - name: Build application
         run: npm run build
 
+      - name: Resolve release metadata
+        id: release_metadata
+        run: |
+          npm_version="$(node -p "require('./package.json').version")"
+          if [ "${GITHUB_REF_NAME}" != "${npm_version}" ] && [ "${GITHUB_REF_NAME}" != "v${npm_version}" ]; then
+            echo "Tag mismatch: GITHUB_REF_NAME=${GITHUB_REF_NAME} but package.json is ${npm_version}" >&2
+            exit 1
+          fi
+
+          if [ "${GITHUB_REF_NAME}" = "${npm_version}" ]; then
+            release_tag="v${npm_version}"
+          else
+            release_tag="${GITHUB_REF_NAME}"
+          fi
+
+          echo "npm_version=${npm_version}" >> "$GITHUB_OUTPUT"
+          echo "release_tag=${release_tag}" >> "$GITHUB_OUTPUT"
+
+      - name: Generate release notes from changelog
+        run: |
+          node - <<'NODE'
+          const fs = require('fs');
+          const version = process.env.NPM_VERSION;
+          const changelog = fs.readFileSync('CHANGELOG.md', 'utf8');
+          const marker = `## [${version}]`;
+          const start = changelog.indexOf(marker);
+
+          if (start === -1) {
+            fs.writeFileSync(
+              'release-notes.md',
+              `## ${version}\n\nNo changelog entry found for ${version}.\n`
+            );
+            process.exit(0);
+          }
+
+          const tail = changelog.slice(start + marker.length);
+          const nextMatch = tail.match(/\n## \[/);
+          const end = nextMatch ? start + marker.length + nextMatch.index : changelog.length;
+          const entry = changelog.slice(start, end).trim();
+          fs.writeFileSync('release-notes.md', `${entry}\n`);
+          NODE
+        env:
+          NPM_VERSION: ${{ steps.release_metadata.outputs.npm_version }}
+
       - name: Prepare draft GitHub release for packaging
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          npm_version="$(node -p "require('./package.json').version")"
-          candidate_tags=("${GITHUB_REF_NAME}" "v${npm_version}" "${npm_version}")
-          release_tag=""
+          release_tag="${{ steps.release_metadata.outputs.release_tag }}"
+          npm_version="${{ steps.release_metadata.outputs.npm_version }}"
 
-          for tag in "${candidate_tags[@]}"; do
-            if gh release view "${tag}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
-              release_tag="${tag}"
-              break
-            fi
-          done
-
-          if [ -n "${release_tag}" ]; then
+          if gh release view "${release_tag}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
             echo "Found existing release tag: ${release_tag}"
-            gh release edit "${release_tag}" --repo "${GITHUB_REPOSITORY}" --draft=true
+            gh release edit "${release_tag}" --repo "${GITHUB_REPOSITORY}" --title "Release ${npm_version}" --notes-file release-notes.md --draft=true
           else
-            release_tag="${GITHUB_REF_NAME}"
             echo "Creating draft release for ${release_tag}"
-            gh release create "${release_tag}" --repo "${GITHUB_REPOSITORY}" --title "Release ${npm_version}" --draft
+            gh release create "${release_tag}" --repo "${GITHUB_REPOSITORY}" --title "Release ${npm_version}" --notes-file release-notes.md --draft
           fi
 
           echo "Cowork release draft prepared: ${release_tag}"
@@ -92,19 +127,8 @@ jobs:
 
       - name: Publish draft GitHub release
         run: |
-          npm_version="$(node -p "require('./package.json').version")"
-          candidate_tags=("${GITHUB_REF_NAME}" "v${npm_version}" "${npm_version}")
-
-          for tag in "${candidate_tags[@]}"; do
-            if gh release view "${tag}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
-              echo "Found release tag: ${tag}"
-              gh release edit "${tag}" --draft=false --repo "${GITHUB_REPOSITORY}"
-              exit 0
-            fi
-          done
-
-          echo "No matching draft release found for tags: ${candidate_tags[*]}" >&2
-          exit 1
+          release_tag="${{ steps.release_metadata.outputs.release_tag }}"
+          gh release edit "${release_tag}" --draft=false --repo "${GITHUB_REPOSITORY}"
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
