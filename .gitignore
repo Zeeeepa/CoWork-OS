@@ -54,6 +54,13 @@ Desktop.ini
 .turbo/
 *.cache
 
+# VitePress docs build output
+docs/.vitepress/dist/
+docs/.vitepress/cache/
+
+# Local npm pack artifacts
+cowork-os-*.tgz
+
 # Test coverage
 coverage/
 
