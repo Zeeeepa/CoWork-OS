@@ -36,11 +36,12 @@ Your AI needs a secure home. CoWork OS provides the runtime, security layers, an
 | **Security-First** | 2800+ unit tests, configurable guardrails, approval workflows, gateway hardening |
 | **Local-First** | Your data stays on your machine. BYOK (Bring Your Own Key) |
 
-### What’s new in 0.3.82
+### What’s new in 0.3.83
 
 - **SIGKILL regression fixed**: runtime native setup no longer uses script-enabled `npm install` for missing `better-sqlite3`, so `electron-winstaller` lifecycle scripts are not triggered during first-time install setup.
 - **0.3.71 reliability behavior preserved**: first-install flow remains `npm install --ignore-scripts --omit=optional` followed by `npm run --prefix node_modules/cowork-os setup`, with retry handling.
-- **Version sync**: bumped to `0.3.82`.
+- **Release pipeline fix**: corrected release installability smoke-test script parsing so GitHub release packaging can complete and attach desktop assets.
+- **Version sync**: bumped to `0.3.83`.
 
 > **Status**: macOS desktop app + headless/server mode (Linux/VPS). Cross-platform desktop support planned.
 

@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.83] - 2026-02-14
+
+### Fixed
+- **Release workflow syntax fix**: corrected the installability smoke-test shell step so the release pipeline no longer exits with `syntax error: unexpected end of file` before desktop packaging.
+- **Release continuity**: preserves the 0.3.82 npm SIGKILL fix while restoring full GitHub release asset publishing (DMG/ZIP).
+
 ## [0.3.82] - 2026-02-14
 
 ### Fixed
@@ -566,6 +572,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 | Version | Date | Highlights |
 |---------|------|------------|
+| 0.3.83 | 2026-02-14 | Fixes release workflow shell parsing so installability validation and desktop asset publishing complete successfully |
 | 0.3.82 | 2026-02-14 | Removes script-enabled recovery installs that triggered electron-winstaller SIGKILL and hardens runtime repair install flags |
 | 0.3.81 | 2026-02-14 | Restored reliable /tmp install flow with retry-safe native setup and CI validation for both registry and npm-pack install paths |
 | 0.3.80 | 2026-02-14 | Fixed macOS first-install runtime setup reliability and hardened release validation so new tags can still run installation checks |
@@ -585,7 +592,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 | 0.1.0 | 2025-01-24 | First public release with core features |
 | 0.0.1 | 2025-01-20 | Initial development setup |
 
-[Unreleased]: https://github.com/CoWork-OS/CoWork-OS/compare/v0.3.82...HEAD
+[Unreleased]: https://github.com/CoWork-OS/CoWork-OS/compare/v0.3.83...HEAD
+[0.3.83]: https://github.com/CoWork-OS/CoWork-OS/releases/tag/v0.3.83
 [0.3.82]: https://github.com/CoWork-OS/CoWork-OS/releases/tag/v0.3.82
 [0.3.81]: https://github.com/CoWork-OS/CoWork-OS/releases/tag/v0.3.81
 [0.3.80]: https://github.com/CoWork-OS/CoWork-OS/releases/tag/v0.3.80
