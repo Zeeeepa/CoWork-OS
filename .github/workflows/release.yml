@@ -85,8 +85,12 @@ jobs:
             cd "$test_dir"
             npm init -y >/dev/null 2>&1
             npm install --ignore-scripts --omit=optional --no-audit --no-fund "$source_path"
-            npm run --prefix node_modules/cowork-os setup
-            node -e "const { execFileSync } = require('node:child_process'); const electron = require('./node_modules/cowork-os/node_modules/electron'); const out = execFileSync(electron, ['-e', \"const Database=require('better-sqlite3');const db=new Database(':memory:');db.close();console.log('ok')\"], { cwd: './node_modules/cowork-os', encoding: 'utf8', env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' } }); if ((out || '').trim() !== 'ok') { console.error('Installed package check failed; better-sqlite3 not loading in Electron.'); process.exit(1); }"
+            npm run --prefix node_modules/cowork-os setup 2>&1 | tee setup.log
+            if grep -q "^\\[cowork\\] setup:bootstrap" setup.log; then
+              echo "Setup unexpectedly triggered dependency bootstrap fallback; electron should resolve from parent node_modules." >&2
+              exit 1
+            fi
+            node -e "const { execFileSync } = require('node:child_process'); const { createRequire } = require('node:module'); const path = require('node:path'); const pkgDir = path.resolve('./node_modules/cowork-os'); const pkgRequire = createRequire(path.join(pkgDir, 'package.json')); const electron = pkgRequire('electron'); const out = execFileSync(electron, ['-e', \"const Database=require('better-sqlite3');const db=new Database(':memory:');db.close();console.log('ok')\"], { cwd: pkgDir, encoding: 'utf8', env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' } }); if ((out || '').trim() !== 'ok') { console.error('Installed package check failed; better-sqlite3 not loading in Electron.'); process.exit(1); }"
           }
 
           smoke_test "$install_source"
@@ -176,6 +180,7 @@ jobs:
   publish-npm:
     name: Publish to npm
     runs-on: ubuntu-latest
+    needs: release
     timeout-minutes: 45
     steps:
       - name: Checkout code
@@ -206,6 +211,7 @@ jobs:
   publish-github-packages:
     name: Publish to GitHub Packages
     runs-on: ubuntu-latest
+    needs: release
     timeout-minutes: 45
     steps:
       - name: Checkout code

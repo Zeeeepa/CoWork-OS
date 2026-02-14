@@ -51,6 +51,19 @@ function getElectronBinaryPath() {
   }
 }
 
+function getInstallRootDir() {
+  const electronPkgPath = resolveFromCwd("electron/package.json");
+  if (!electronPkgPath) return process.cwd();
+
+  const electronDir = path.dirname(electronPkgPath);
+  const nodeModulesDir = path.dirname(electronDir);
+  const installRoot = path.dirname(nodeModulesDir);
+  const installRootPkg = path.join(installRoot, "package.json");
+
+  if (fs.existsSync(installRootPkg)) return installRoot;
+  return process.cwd();
+}
+
 function run(cmd, args, opts = {}) {
   const pretty = [cmd, ...(args || [])].join(" ");
   console.log(`\n[cowork] $ ${pretty}`);
@@ -135,7 +148,7 @@ function testBetterSqlite3InElectron(env) {
   return res;
 }
 
-function ensureBetterSqlite3(env) {
+function ensureBetterSqlite3(env, installRootDir) {
   const pkgPath = resolveFromCwd("better-sqlite3/package.json");
 
   if (pkgPath && fs.existsSync(pkgPath)) {
@@ -145,6 +158,10 @@ function ensureBetterSqlite3(env) {
   console.log(
     `[cowork] better-sqlite3 is missing; installing ${BETTER_SQLITE3_VERSION}...`
   );
+
+  if (installRootDir !== process.cwd()) {
+    console.log(`[cowork] Installing better-sqlite3 from root ${installRootDir}`);
+  }
 
   return run(
     NPM_CMD,
@@ -158,7 +175,7 @@ function ensureBetterSqlite3(env) {
       "--no-save",
       `better-sqlite3@${BETTER_SQLITE3_VERSION}`,
     ],
-    { env }
+    { env, cwd: installRootDir }
   );
 }
 
@@ -212,6 +229,7 @@ function main() {
 
   const attempt = (attemptJobs) => {
     const env = baseEnvWithJobs(attemptJobs);
+    const installRootDir = getInstallRootDir();
     const electronInstallScript = resolveFromCwd("electron/install.js");
     const electronBinary = getElectronBinaryPath();
 
@@ -231,7 +249,7 @@ function main() {
     }
 
     // If optional dependency install was skipped/failed earlier, recover here.
-    const ensureBetterRes = ensureBetterSqlite3(env);
+    const ensureBetterRes = ensureBetterSqlite3(env, installRootDir);
     if (ensureBetterRes.status !== 0) return ensureBetterRes;
 
     const electronVersion = getElectronVersion();
@@ -256,7 +274,7 @@ function main() {
       const rebuildElectronRes = run(
         NPM_CMD,
         ["rebuild", "--ignore-scripts=false", "better-sqlite3"],
-        { env: electronEnv }
+        { env: electronEnv, cwd: installRootDir }
       );
       if (rebuildElectronRes.status !== 0) return rebuildElectronRes;
 
@@ -297,7 +315,7 @@ function main() {
         "better-sqlite3",
         "--sequential",
       ],
-      { env }
+      { env, cwd: installRootDir }
     );
     if (rebuildRes.status !== 0) return rebuildRes;
 
