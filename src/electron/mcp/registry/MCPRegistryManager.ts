@@ -258,6 +258,7 @@ function getConnectorEntries(): MCPRegistryEntry[] {
   const linearCommand = getConnectorCommandArgs('linear-mcp');
   const asanaCommand = getConnectorCommandArgs('asana-mcp');
   const oktaCommand = getConnectorCommandArgs('okta-mcp');
+  const resendCommand = getConnectorCommandArgs('resend-mcp');
 
   return [
     {
@@ -508,6 +509,37 @@ function getConnectorEntries(): MCPRegistryEntry[] {
       tags: ['okta', 'identity', 'enterprise', 'connector'],
       category: 'enterprise',
       verified: true,
+    },
+    {
+      id: 'resend',
+      name: 'Resend',
+      description:
+        'Resend email connector for CoWork OS. Supports sending emails and webhook management. Requires RESEND_API_KEY.',
+      version: LOCAL_CONNECTOR_VERSION,
+      author: 'CoWork OS',
+      homepage: 'https://github.com/CoWork-OS/CoWork-OS',
+      repository: 'https://github.com/CoWork-OS/CoWork-OS',
+      license: 'MIT',
+      installMethod: 'manual',
+      transport: 'stdio',
+      defaultCommand: resendCommand.command,
+      defaultArgs: resendCommand.args,
+      defaultEnv: {
+        RESEND_API_KEY: '',
+        RESEND_BASE_URL: 'https://api.resend.com',
+      },
+      tools: [
+        { name: 'resend.health', description: 'Check connector health and auth status' },
+        { name: 'resend.send_email', description: 'Send an email via Resend API' },
+        { name: 'resend.list_webhooks', description: 'List webhook endpoints' },
+        { name: 'resend.create_webhook', description: 'Create a webhook endpoint' },
+        { name: 'resend.delete_webhook', description: 'Delete a webhook endpoint' },
+        { name: 'resend.get_received_email', description: 'Retrieve a received email by email_id' },
+      ],
+      tags: ['resend', 'email', 'automation', 'connector'],
+      category: 'communication',
+      verified: true,
+      featured: true,
     },
   ];
 }

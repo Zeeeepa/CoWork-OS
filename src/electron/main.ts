@@ -882,7 +882,8 @@ app.on('before-quit', async () => {
 // Handle folder selection
 ipcMain.handle('dialog:selectFolder', async () => {
   const result = await dialog.showOpenDialog({
-    properties: ['openDirectory'],
+    // Allow creating folders directly from the native picker when supported.
+    properties: ['openDirectory', 'createDirectory'],
     title: 'Select Workspace Folder',
   });
 

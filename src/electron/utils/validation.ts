@@ -11,7 +11,7 @@ import { LLM_PROVIDER_TYPES, isTempWorkspaceId, PersonalityId } from '../../shar
 const MAX_STRING_LENGTH = 10000;
 const MAX_PATH_LENGTH = 4096;
 const MAX_TITLE_LENGTH = 500;
-const MAX_PROMPT_LENGTH = 100000;
+const MAX_PROMPT_LENGTH = 500000; // ~125K tokens; fits within 200K-token model context
 
 const PersonalityIdSchema = z.preprocess(
   (value) => (typeof value === 'string' ? value.trim() : value),
@@ -24,6 +24,26 @@ const PersonalityIdSchema = z.preprocess(
     'casual',
     'custom',
   ] as const satisfies readonly PersonalityId[])
+);
+
+const OriginChannelSchema = z.preprocess(
+  (value) => (typeof value === 'string' ? value.trim().toLowerCase() : value),
+  z.enum([
+    'telegram',
+    'discord',
+    'slack',
+    'whatsapp',
+    'imessage',
+    'signal',
+    'mattermost',
+    'matrix',
+    'twitch',
+    'line',
+    'bluebubbles',
+    'email',
+    'teams',
+    'googlechat',
+  ] as const)
 );
 
 // ============ Workspace Schemas ============
@@ -51,11 +71,14 @@ const AgentConfigSchema = z.object({
   personalityId: PersonalityIdSchema.optional(),
   gatewayContext: z.enum(['private', 'group', 'public']).optional(),
   toolRestrictions: z.array(z.string().min(1).max(200)).max(50).optional(),
+  originChannel: OriginChannelSchema.optional(),
   maxTurns: z.number().int().min(1).max(100).optional(),
   maxTokens: z.number().int().min(1).max(1_000_000).optional(),
   retainMemory: z.boolean().optional(),
   bypassQueue: z.boolean().optional(),
   allowUserInput: z.boolean().optional(),
+  allowSharedContextMemory: z.boolean().optional(),
+  conversationMode: z.enum(['task', 'chat', 'hybrid']).optional(),
   autonomousMode: z.boolean().optional(),
   qualityPasses: z.union([z.literal(1), z.literal(2), z.literal(3)]).optional(),
 }).strict();
@@ -371,6 +394,10 @@ export const AddWhatsAppChannelSchema = z.object({
   ambientMode: z.boolean().optional(),
   silentUnauthorized: z.boolean().optional(),
   selfChatMode: z.boolean().optional(),
+  groupRoutingMode: z.enum(['all', 'mentionsOnly', 'mentionsOrCommands', 'commandsOnly']).optional(),
+  trustedGroupMemoryOptIn: z.boolean().optional(),
+  sendReadReceipts: z.boolean().optional(),
+  deduplicationEnabled: z.boolean().optional(),
   responsePrefix: z.string().max(20).optional(),
   ingestNonSelfChatsInSelfChatMode: z.boolean().optional(),
 });
@@ -494,6 +521,7 @@ export const AddChannelSchema = z.discriminatedUnion('type', [
 export const ChannelConfigSchema = z.object({
   selfChatMode: z.boolean().optional(),
   responsePrefix: z.string().max(20).optional(),
+  trustedGroupMemoryOptIn: z.boolean().optional(),
 }).passthrough(); // Allow additional properties
 
 export const UpdateChannelSchema = z.object({
