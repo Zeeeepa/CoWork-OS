@@ -49,6 +49,14 @@ Your AI needs a secure home. CoWork OS provides the runtime, security layers, an
 
 ### Current Branch Enhancements (Unreleased)
 
+- **Executor reliability**: tasks can no longer get stuck in `executing` status after follow-ups; varied-failure loop detection nudges the agent to switch strategy after 5 persistent tool failures.
+- **Smarter artifact handling**: read-only analysis steps no longer require artifact output; verification evidence is skipped when the task already produced files; document creation only triggers for explicit DOCX/PDF requests (attachment filenames no longer cause false positives).
+- **Gateway connection resilience**: Slack Socket Mode uses relaxed ping/pong timeouts (15s/60s) to reduce reconnection churn; WhatsApp adds connection-flap detection with enforced backoff when rapid disconnect/reconnect cycles are detected.
+- **XLSX file support**: Excel spreadsheets (.xlsx/.xls) can now be read and extracted as tab-separated text in the file viewer, with support for formulas, rich text, and dates.
+- **Attachment chips in chat**: user message bubbles now show compact attachment chips instead of raw file listings; the collapsible bubble toggle shows both "Show more" and "Show less".
+- **User identity hardening**: the personality prompt now explicitly instructs the LLM to ignore names found in file paths, filenames, and OS metadata when a preferred name is stored, preventing identity leakage.
+- **Hooks auto-token**: enabled hooks server auto-generates a missing authentication token instead of silently disabling.
+- **Reduced log noise**: suppressed zero-count startup messages for plugins, canvas sessions, and legacy settings; demoted MCP stderr to debug level.
 - **Relationship-agent runtime**: tasks are now intent-routed (`chat`, `advice`, `planning`, `execution`, `mixed`) and strategy-bound before execution.
 - **Answer-first behavior**: strategy-marked prompts emit a direct user answer early, then continue with deeper execution when needed.
 - **Soft-deadline execution control**: long-running steps switch to best-effort finalization before hard timeout to reduce unfinished tasks.

@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **XLSX file support**: Excel spreadsheets (.xlsx/.xls) can now be read and extracted as tab-separated text in the file viewer, with formula result, rich text, and date support.
+- **Attachment chips in chat bubbles**: user message bubbles render compact file-attachment chips instead of raw file-path listings.
+- **Varied failure loop detection**: executor detects when a tool fails 5+ times with different inputs and nudges the agent to switch strategy.
+
+### Changed
+- **Document creation defaults**: Markdown (.md) is now the preferred output format; `create_document` (DOCX/PDF) only triggers on explicit user request.
+- **Hooks auto-token**: enabled hooks server auto-generates a missing authentication token instead of silently disabling.
+- **Reduced startup log noise**: zero-count messages for plugins, canvas sessions, and legacy settings are suppressed; MCP stderr demoted to debug.
+- **Slack Socket Mode timeouts**: relaxed ping/pong timeouts (15s/60s) to reduce reconnection churn on unstable networks.
+
+### Fixed
+- **Stuck 'executing' status**: tasks can no longer remain in `executing` state after follow-ups — safety nets ensure completed or restored status.
+- **User identity leakage**: personality prompt now explicitly instructs the LLM to ignore names from file paths, filenames, and OS metadata when a preferred name is stored.
+- **WhatsApp connection flap detection**: rapid disconnect/reconnect cycles are detected and throttled with enforced backoff.
+- **Artifact false positives**: attachment filenames (e.g. "26targets.xlsx") no longer falsely trigger document-creation mode; read-only steps skip artifact output requirement.
+- **Collapsible user bubble toggle**: shows both "Show more" and "Show less" (previously button disappeared after expanding).
+- **Daemon shutdown task persistence**: active tasks are marked cancelled in DB before executor cancellation to prevent orphaned-task detection on restart.
+
 ## [0.3.86] - 2026-02-14
 
 ### Added
