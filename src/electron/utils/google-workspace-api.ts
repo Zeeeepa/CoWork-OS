@@ -139,7 +139,7 @@ export async function googleDriveUpload(
       const response = await fetch(url, {
         method: 'PATCH',
         headers,
-        body: data,
+        body: Buffer.from(data),
         signal: controller.signal,
       });
 

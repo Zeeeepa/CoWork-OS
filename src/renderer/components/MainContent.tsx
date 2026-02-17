@@ -21,6 +21,7 @@ import {
 
 // localStorage key for verbose mode
 const VERBOSE_STEPS_KEY = 'cowork:verboseSteps';
+const CODE_PREVIEWS_EXPANDED_KEY = 'cowork:codePreviewsExpanded';
 const TASK_TITLE_MAX_LENGTH = 50;
 const TITLE_ELLIPSIS_REGEX = /(\.\.\.|\u2026)$/u;
 const MAX_ATTACHMENTS = 10;
@@ -315,6 +316,39 @@ function MessageCopyButton({ text }: { text: string }) {
       )}
       <span>{copied ? 'Copied' : 'Copy'}</span>
     </button>
+  );
+}
+
+// Collapsible user message bubble - limits height and expands on click
+function CollapsibleUserBubble({ children }: { children: React.ReactNode }) {
+  const [expanded, setExpanded] = useState(false);
+  const [needsCollapse, setNeedsCollapse] = useState(false);
+  const contentRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (contentRef.current) {
+      setNeedsCollapse(contentRef.current.scrollHeight > 220);
+    }
+  }, [children]);
+
+  const collapsed = needsCollapse && !expanded;
+
+  return (
+    <>
+      <div
+        ref={contentRef}
+        className={`chat-bubble user-bubble markdown-content${!collapsed ? ' expanded' : ''}`}
+        onClick={() => { if (collapsed) setExpanded(true); }}
+      >
+        {children}
+        {collapsed && <div className="user-bubble-fade" />}
+      </div>
+      {collapsed && (
+        <button className="user-bubble-expand-btn" onClick={() => setExpanded(true)}>
+          Show more
+        </button>
+      )}
+    </>
   );
 }
 
@@ -971,7 +1005,6 @@ export function MainContent({ task, selectedTaskId, workspace, events, onSendMes
   const [autonomousModeEnabled, setAutonomousModeEnabled] = useState(false);
   const [showSteps, setShowSteps] = useState(true);
   const [autoScroll, setAutoScroll] = useState(true);
-  const [queuedMessage, setQueuedMessage] = useState<string | null>(null);
   // Track toggled events by ID for stable state across filtering
   const [toggledEvents, setToggledEvents] = useState<Set<string>>(new Set());
   const [appVersion, setAppVersion] = useState<string>('');
@@ -1007,6 +1040,7 @@ export function MainContent({ task, selectedTaskId, workspace, events, onSendMes
     },
     onError: (error) => {
       console.error('Talk mode error:', error);
+      setShowVoiceNotConfigured(true);
     },
   });
   const [viewerFilePath, setViewerFilePath] = useState<string | null>(null);
@@ -1023,6 +1057,11 @@ export function MainContent({ task, selectedTaskId, workspace, events, onSendMes
   const [verboseSteps, setVerboseSteps] = useState(() => {
     const saved = localStorage.getItem(VERBOSE_STEPS_KEY);
     return saved === 'true';
+  });
+  // Code previews expanded by default (true = open, false = collapsed)
+  const [codePreviewsExpanded, setCodePreviewsExpanded] = useState(() => {
+    const saved = localStorage.getItem(CODE_PREVIEWS_EXPANDED_KEY);
+    return saved !== 'false'; // default to true (expanded)
   });
   // Voice state - track if voice is enabled
   const [voiceEnabled, setVoiceEnabled] = useState(false);
@@ -1155,6 +1194,14 @@ export function MainContent({ task, selectedTaskId, workspace, events, onSendMes
     setVerboseSteps(prev => {
       const newValue = !prev;
       localStorage.setItem(VERBOSE_STEPS_KEY, String(newValue));
+      return newValue;
+    });
+  };
+
+  const toggleCodePreviews = () => {
+    setCodePreviewsExpanded(prev => {
+      const newValue = !prev;
+      localStorage.setItem(CODE_PREVIEWS_EXPANDED_KEY, String(newValue));
       return newValue;
     });
   };
@@ -1469,6 +1516,8 @@ export function MainContent({ task, selectedTaskId, workspace, events, onSendMes
   // Check if an event has details to show
   const hasEventDetails = (event: TaskEvent): boolean => {
     if (isImageFileEvent(event)) return true;
+    if (event.type === 'file_created' && (event.payload?.contentPreview || event.payload?.copiedFrom)) return true;
+    if (event.type === 'file_modified' && (event.payload?.oldPreview || event.payload?.action === 'rename')) return true;
     return ['plan_created', 'tool_call', 'tool_result', 'assistant_message', 'error', 'step_failed'].includes(event.type);
   };
 
@@ -1477,6 +1526,11 @@ export function MainContent({ task, selectedTaskId, workspace, events, onSendMes
   // Verbose events (tool calls/results) should be collapsed
   const shouldDefaultExpand = (event: TaskEvent): boolean => {
     if (isImageFileEvent(event)) return true;
+    // Code previews: expand by default unless user opted for collapsed
+    if (codePreviewsExpanded) {
+      if (event.type === 'file_created' && (event.payload?.contentPreview || event.payload?.copiedFrom)) return true;
+      if (event.type === 'file_modified' && (event.payload?.oldPreview || event.payload?.action === 'rename')) return true;
+    }
     return ['plan_created', 'assistant_message', 'error', 'step_failed'].includes(event.type);
   };
 
@@ -1491,7 +1545,6 @@ export function MainContent({ task, selectedTaskId, workspace, events, onSendMes
 
   const timelineRef = useRef<HTMLDivElement>(null);
   const mainBodyRef = useRef<HTMLDivElement>(null);
-  const prevTaskBusyRef = useRef<boolean>(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const mentionContainerRef = useRef<HTMLDivElement>(null);
   const mentionDropdownRef = useRef<HTMLDivElement>(null);
@@ -1556,23 +1609,6 @@ export function MainContent({ task, selectedTaskId, workspace, events, onSendMes
   useEffect(() => {
     setAutoScroll(true);
   }, [task?.id]);
-
-  useEffect(() => {
-    prevTaskBusyRef.current = false;
-  }, [task?.id]);
-
-  // Send queued message when task finishes executing
-  useEffect(() => {
-    const wasBusy = prevTaskBusyRef.current;
-
-    // If task was actively working and now it's idle, send the queued message.
-    if (wasBusy && !isTaskWorking && queuedMessage) {
-      onSendMessage(queuedMessage);
-      setQueuedMessage(null);
-    }
-
-    prevTaskBusyRef.current = isTaskWorking;
-  }, [isTaskWorking, queuedMessage, onSendMessage]);
 
   // Process command_output events to track live command execution
   useEffect(() => {
@@ -1934,10 +1970,6 @@ export function MainContent({ task, selectedTaskId, workspace, events, onSendMes
         setAttachmentError(null);
       }
     }
-  };
-
-  const handleClearQueue = () => {
-    setQueuedMessage(null);
   };
 
   const findMentionAtCursor = (value: string, cursor: number | null) => {
@@ -2597,11 +2629,11 @@ export function MainContent({ task, selectedTaskId, workspace, events, onSendMes
         <div className="task-content">
           {/* User Prompt - Right aligned like chat */}
           <div className="chat-message user-message">
-            <div className="chat-bubble user-bubble markdown-content">
+            <CollapsibleUserBubble>
               <ReactMarkdown remarkPlugins={userMarkdownPlugins} components={markdownComponents}>
                 {task.prompt}
               </ReactMarkdown>
-            </div>
+            </CollapsibleUserBubble>
             <MessageCopyButton text={task.prompt} />
           </div>
 
@@ -2618,13 +2650,22 @@ export function MainContent({ task, selectedTaskId, workspace, events, onSendMes
                 </svg>
               </button>
               {showSteps && (
-                <button
-                  className={`verbose-toggle-btn ${verboseSteps ? 'active' : ''}`}
-                  onClick={toggleVerboseSteps}
-                  title={verboseSteps ? 'Show important steps only' : 'Show all steps (verbose)'}
-                >
-                  {verboseSteps ? 'Verbose' : 'Summary'}
-                </button>
+                <>
+                  <button
+                    className={`verbose-toggle-btn ${verboseSteps ? 'active' : ''}`}
+                    onClick={toggleVerboseSteps}
+                    title={verboseSteps ? 'Show important steps only' : 'Show all steps (verbose)'}
+                  >
+                    {verboseSteps ? 'Verbose' : 'Summary'}
+                  </button>
+                  <button
+                    className={`verbose-toggle-btn ${codePreviewsExpanded ? 'active' : ''}`}
+                    onClick={toggleCodePreviews}
+                    title={codePreviewsExpanded ? 'Collapse code previews by default' : 'Expand code previews by default'}
+                  >
+                    {codePreviewsExpanded ? 'Code: Open' : 'Code: Collapsed'}
+                  </button>
+                </>
               )}
             </div>
           )}
@@ -2668,11 +2709,11 @@ export function MainContent({ task, selectedTaskId, workspace, events, onSendMes
                   return (
                     <Fragment key={event.id || `event-${item.eventIndex}`}>
                       <div className="chat-message user-message">
-                        <div className="chat-bubble user-bubble markdown-content">
+                        <CollapsibleUserBubble>
                           <ReactMarkdown remarkPlugins={userMarkdownPlugins} components={markdownComponents}>
                             {messageText}
                           </ReactMarkdown>
-                        </div>
+                        </CollapsibleUserBubble>
                         <MessageCopyButton text={messageText} />
                       </div>
                       {shouldRenderCommandOutput && (
@@ -2826,23 +2867,6 @@ export function MainContent({ task, selectedTaskId, workspace, events, onSendMes
           onDragLeave={handleDragLeave}
           onDrop={handleDrop}
         >
-          {/* Queued message display */}
-          {queuedMessage && (
-            <div className="queued-message-frame">
-              <div className="queued-message-content">
-                <svg className="queued-message-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <path d="M12 19V5M5 12l7-7 7 7" />
-                </svg>
-                <span className="queued-message-label">Queue:</span>
-                <span className="queued-message-text">{queuedMessage}</span>
-              </div>
-              <button className="queued-message-clear" onClick={handleClearQueue} title="Remove from queue">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <path d="M18 6L6 18M6 6l12 12" />
-                </svg>
-              </button>
-            </div>
-          )}
           {showVoiceNotConfigured && (
             <div className="voice-not-configured-banner">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -2917,7 +2941,7 @@ export function MainContent({ task, selectedTaskId, workspace, events, onSendMes
               <textarea
                 ref={textareaRef}
                 className="input-field input-textarea"
-                placeholder={queuedMessage ? agentContext.getUiCopy('inputPlaceholderQueued') : agentContext.getMessage('placeholderActive')}
+                placeholder={agentContext.getMessage('placeholderActive')}
                 value={inputValue}
                 onChange={handleInputChange}
                 onKeyDown={handleKeyDown}
@@ -3001,17 +3025,7 @@ export function MainContent({ task, selectedTaskId, workspace, events, onSendMes
                   <span className="voice-recording-indicator" style={{ width: `${talkMode.audioLevel}%` }} />
                 )}
               </button>
-              <button
-                className="lets-go-btn lets-go-btn-sm"
-                onClick={handleSend}
-                disabled={(!inputValue.trim() && pendingAttachments.length === 0) || isUploadingAttachments || isPreparingMessage}
-                title="Send message"
-              >
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <path d="M12 19V5M5 12l7-7 7 7" />
-                </svg>
-              </button>
-              {isTaskWorking && onStopTask && (
+              {isTaskWorking && onStopTask ? (
                 <button
                   className="stop-btn-simple"
                   onClick={onStopTask}
@@ -3019,6 +3033,17 @@ export function MainContent({ task, selectedTaskId, workspace, events, onSendMes
                 >
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                     <rect x="3" y="3" width="18" height="18" rx="2" />
+                  </svg>
+                </button>
+              ) : (
+                <button
+                  className="lets-go-btn lets-go-btn-sm"
+                  onClick={handleSend}
+                  disabled={(!inputValue.trim() && pendingAttachments.length === 0) || isUploadingAttachments || isPreparingMessage}
+                  title="Send message"
+                >
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <path d="M12 19V5M5 12l7-7 7 7" />
                   </svg>
                 </button>
               )}
@@ -3166,8 +3191,27 @@ function renderEventTitle(
       return getMessage('stepCompleted', msgCtx, event.payload.step?.description || event.payload.message);
     case 'step_failed':
       return `Step failed: ${event.payload.step?.description || 'Unknown step'}`;
-    case 'tool_call':
-      return `Using: ${event.payload.tool}`;
+    case 'tool_call': {
+      const tcTool = event.payload.tool;
+      const tcInput = event.payload.input;
+      let tcDetail = '';
+      if (tcTool === 'write_file' && tcInput?.path) {
+        const tcLines = tcInput.content ? tcInput.content.split('\n').length : 0;
+        tcDetail = ` → ${tcInput.path} (${tcLines} lines)`;
+      } else if (tcTool === 'edit_file' && tcInput?.file_path) {
+        tcDetail = ` → ${tcInput.file_path}`;
+      } else if (tcTool === 'read_file' && tcInput?.path) {
+        tcDetail = ` → ${tcInput.path}`;
+      } else if (tcTool === 'run_command' && tcInput?.command) {
+        const cmd = tcInput.command.length > 40 ? tcInput.command.slice(0, 40) + '...' : tcInput.command;
+        tcDetail = ` → ${cmd}`;
+      } else if (tcTool === 'glob' && tcInput?.pattern) {
+        tcDetail = ` → ${tcInput.pattern}`;
+      } else if ((tcTool === 'grep' || tcTool === 'search_files') && tcInput?.pattern) {
+        tcDetail = ` → /${tcInput.pattern}/`;
+      }
+      return `Using: ${tcTool}${tcDetail}`;
+    }
     case 'tool_result': {
       const result = event.payload.result;
       const success = result?.success !== false && !result?.error;
@@ -3266,18 +3310,47 @@ function renderEventTitle(
     }
     case 'assistant_message':
       return msgCtx.agentName;
-    case 'file_created':
+    case 'file_created': {
+      const fcp = event.payload;
+      let fcSuffix = '';
+      if (fcp.type === 'directory') {
+        fcSuffix = ' (directory)';
+      } else if (fcp.type === 'screenshot') {
+        fcSuffix = ' (screenshot)';
+      } else if (fcp.copiedFrom) {
+        fcSuffix = ' (copy)';
+      } else if (fcp.lineCount && fcp.size) {
+        fcSuffix = ` (${fcp.lineCount} lines, ${formatFileSize(fcp.size)})`;
+      } else if (fcp.size) {
+        fcSuffix = ` (${formatFileSize(fcp.size)})`;
+      }
       return (
         <span>
-          Created: <ClickableFilePath path={event.payload.path} workspacePath={workspacePath} onOpenViewer={onOpenViewer} />
+          Created: <ClickableFilePath path={fcp.path} workspacePath={workspacePath} onOpenViewer={onOpenViewer} />
+          {fcSuffix && <span className="event-title-meta">{fcSuffix}</span>}
         </span>
       );
-    case 'file_modified':
+    }
+    case 'file_modified': {
+      const fmp = event.payload;
+      const fmPath = fmp.path || fmp.from;
+      let fmSuffix = '';
+      if (fmp.action === 'rename' && fmp.to) {
+        const toName = fmp.to.split('/').pop();
+        fmSuffix = ` → ${toName}`;
+      } else if (fmp.type === 'edit' && fmp.replacements) {
+        const netStr = fmp.netLines != null
+          ? (fmp.netLines > 0 ? `, +${fmp.netLines} lines` : fmp.netLines < 0 ? `, ${fmp.netLines} lines` : '')
+          : '';
+        fmSuffix = ` (${fmp.replacements} edit${fmp.replacements > 1 ? 's' : ''}${netStr})`;
+      }
       return (
         <span>
-          Updated: <ClickableFilePath path={event.payload.path || event.payload.from} workspacePath={workspacePath} onOpenViewer={onOpenViewer} />
+          Updated: <ClickableFilePath path={fmPath} workspacePath={workspacePath} onOpenViewer={onOpenViewer} />
+          {fmSuffix && <span className="event-title-meta">{fmSuffix}</span>}
         </span>
       );
+    }
     case 'file_deleted':
       return `Removed: ${event.payload.path}`;
     case 'error':
@@ -3334,12 +3407,61 @@ function renderEventDetails(
         </div>
       );
     }
-    case 'tool_call':
+    case 'tool_call': {
+      const tcToolName = event.payload.tool;
+      const tcInput = event.payload.input;
+
+      // write_file: show path + code preview
+      if (tcToolName === 'write_file' && tcInput?.path && tcInput?.content) {
+        const tcLines = tcInput.content.split('\n');
+        const tcPreview = tcLines.slice(0, 20).join('\n');
+        const tcExt = (tcInput.path.split('.').pop() || 'text').toLowerCase();
+        return (
+          <div className="event-details event-details-scrollable event-details-code-preview">
+            <div className="code-preview-header">
+              <span className="code-preview-path">{tcInput.path}</span>
+              <span className="code-preview-language">{tcExt}</span>
+            </div>
+            <pre className="code-preview-content"><code>{truncateForDisplay(tcPreview, 1500)}</code></pre>
+            {tcLines.length > 20 && (
+              <div className="code-preview-truncated">... {tcLines.length - 20} more lines</div>
+            )}
+          </div>
+        );
+      }
+
+      // edit_file: show diff-like view
+      if (tcToolName === 'edit_file' && tcInput?.file_path) {
+        return (
+          <div className="event-details event-details-scrollable event-details-code-preview">
+            <div className="code-preview-header">
+              <span className="code-preview-path">{tcInput.file_path}</span>
+            </div>
+            <div className="edit-diff-preview">
+              {tcInput.old_string && (
+                <div className="diff-line diff-removed">
+                  <span className="diff-marker">-</span>
+                  <pre><code>{truncateForDisplay(tcInput.old_string, 500)}</code></pre>
+                </div>
+              )}
+              {tcInput.new_string && (
+                <div className="diff-line diff-added">
+                  <span className="diff-marker">+</span>
+                  <pre><code>{truncateForDisplay(tcInput.new_string, 500)}</code></pre>
+                </div>
+              )}
+            </div>
+          </div>
+        );
+      }
+
+      // Default: formatted JSON
       return (
         <div className="event-details event-details-scrollable">
-          <pre>{truncateForDisplay(JSON.stringify(event.payload.input, null, 2))}</pre>
+          <pre>{truncateForDisplay(JSON.stringify(tcInput, null, 2))}</pre>
         </div>
       );
+    }
     case 'tool_result':
       return (
         <div className="event-details event-details-scrollable">
@@ -3366,21 +3488,101 @@ function renderEventDetails(
           {event.payload?.reason || event.payload?.step?.error || 'Step failed.'}
         </div>
       );
-    case 'file_created':
+    case 'file_created': {
+      const fcPayload = event.payload;
+      const fcPath = fcPayload?.path;
+      const fcIsImage =
+        fcPayload?.type === 'image' ||
+        (typeof fcPayload?.mimeType === 'string' && fcPayload.mimeType.toLowerCase().startsWith('image/')) ||
+        imageExt.test(String(fcPath || ''));
+
+      if (fcIsImage && fcPath && workspacePath) {
+        return (
+          <div className="event-details event-details-file-preview">
+            <InlineImagePreview filePath={fcPath} workspacePath={workspacePath} onOpenViewer={onOpenViewer} />
+          </div>
+        );
+      }
+
+      // Content preview for text file writes
+      if (fcPayload?.contentPreview) {
+        const previewLineCount = fcPayload.contentPreview.split('\n').length;
+        return (
+          <div className="event-details event-details-scrollable event-details-code-preview">
+            <div className="code-preview-header">
+              <span className="code-preview-language">{fcPayload.language || 'text'}</span>
+              {fcPayload.previewTruncated && (
+                <span className="code-preview-truncated">
+                  showing first {previewLineCount} of {fcPayload.lineCount} lines
+                </span>
+              )}
+            </div>
+            <pre className="code-preview-content"><code>{fcPayload.contentPreview}</code></pre>
+          </div>
+        );
+      }
+
+      // Copy source info
+      if (fcPayload?.copiedFrom) {
+        return (
+          <div className="event-details">
+            Copied from: <ClickableFilePath path={fcPayload.copiedFrom} workspacePath={workspacePath} onOpenViewer={onOpenViewer} />
+          </div>
+        );
+      }
+
+      return null;
+    }
     case 'file_modified': {
-      const filePath = event.payload?.path || event.payload?.from;
-      const isImage =
-        event.payload?.type === 'image' ||
-        (typeof event.payload?.mimeType === 'string' && event.payload.mimeType.toLowerCase().startsWith('image/')) ||
-        imageExt.test(String(filePath || ''));
+      const fmPayload = event.payload;
+      const fmPath = fmPayload?.path || fmPayload?.from;
+      const fmIsImage =
+        fmPayload?.type === 'image' ||
+        (typeof fmPayload?.mimeType === 'string' && fmPayload.mimeType.toLowerCase().startsWith('image/')) ||
+        imageExt.test(String(fmPath || ''));
 
-      if (!isImage || !filePath || !workspacePath) return null;
+      if (fmIsImage && fmPath && workspacePath) {
+        return (
+          <div className="event-details event-details-file-preview">
+            <InlineImagePreview filePath={fmPath} workspacePath={workspacePath} onOpenViewer={onOpenViewer} />
+          </div>
+        );
+      }
 
-      return (
-        <div className="event-details event-details-file-preview">
-          <InlineImagePreview filePath={filePath} workspacePath={workspacePath} onOpenViewer={onOpenViewer} />
-        </div>
-      );
+      // Edit diff preview
+      if (fmPayload?.type === 'edit' && (fmPayload?.oldPreview || fmPayload?.newPreview)) {
+        return (
+          <div className="event-details event-details-scrollable event-details-code-preview">
+            <div className="edit-diff-preview">
+              {fmPayload.oldPreview && (
+                <div className="diff-line diff-removed">
+                  <span className="diff-marker">-</span>
+                  <pre><code>{fmPayload.oldPreview}</code></pre>
+                </div>
+              )}
+              {fmPayload.newPreview && (
+                <div className="diff-line diff-added">
+                  <span className="diff-marker">+</span>
+                  <pre><code>{fmPayload.newPreview}</code></pre>
+                </div>
+              )}
+            </div>
+          </div>
+        );
+      }
+
+      // Rename info
+      if (fmPayload?.action === 'rename' && fmPayload?.from && fmPayload?.to) {
+        return (
+          <div className="event-details">
+            <ClickableFilePath path={fmPayload.from} workspacePath={workspacePath} onOpenViewer={onOpenViewer} />
+            {' → '}
+            <ClickableFilePath path={fmPayload.to} workspacePath={workspacePath} onOpenViewer={onOpenViewer} />
+          </div>
+        );
+      }
+
+      return null;
     }
     case 'error':
       return (

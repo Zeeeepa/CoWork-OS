@@ -118,7 +118,7 @@ export async function dropboxContentUpload(
     const response = await fetch(url, {
       method: 'POST',
       headers,
-      body: opts.data,
+      body: Buffer.from(opts.data),
       signal: controller.signal,
     });
 

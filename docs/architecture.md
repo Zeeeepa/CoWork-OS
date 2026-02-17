@@ -40,6 +40,23 @@ Key code:
 - Agent orchestration: `src/electron/agent/daemon.ts`, `src/electron/agent/executor.ts`, `src/electron/agent/queue-manager.ts`
 - Tool runtime: `src/electron/agent/tools/registry.ts`
 
+#### Intent Routing & Strategy Layer
+
+Each task prompt is classified by `IntentRouter` into one of five intent types (`chat`, `advice`, `planning`, `execution`, `mixed`) with a confidence score. `TaskStrategyService` then derives execution defaults (conversation mode, max turns, quality passes, answer-first bias, bounded research, timeout-finalize bias) from the classified intent. Strategy is applied at task creation in the daemon and re-applied when queued tasks are dequeued.
+
+Key code:
+- Intent classifier: `src/electron/agent/strategy/IntentRouter.ts`
+- Strategy service: `src/electron/agent/strategy/TaskStrategyService.ts`
+- Strategy integration: `src/electron/agent/daemon.ts` (task creation), `src/electron/agent/context-manager.ts` (context injection)
+
+#### Completion Contract & Timeout Recovery
+
+The executor tracks cancellation reasons (`user`, `timeout`, `shutdown`, `system`) and uses a completion-first approach where the agent is biased to provide an answer before performing tool work. On timeout, `finalizeWithTimeoutRecovery()` attempts a best-effort finalization pass that produces a partial answer rather than an empty failure. Retry logic includes adaptive token capping (`applyRetryTokenCap`) and timeout scaling (`getRetryTimeoutMs`) informed by observed output tokens/sec.
+
+Key code:
+- Timeout recovery: `src/electron/agent/executor.ts` (`finalizeWithTimeoutRecovery`, `finalizeTaskBestEffort`, `buildTimeoutRecoveryAnswer`)
+- Retry helpers: `src/electron/agent/executor.ts` (`applyRetryTokenCap`, `getRetryTimeoutMs`, `isAbortLikeError`)
+
 ### 2. Use Tools and Skills
 
 CoWork OS exposes "tools" to the agent. Tools include:
@@ -74,7 +91,7 @@ Notes on "skills":
 - Skill sources and precedence (highest wins):
   - Workspace skills: `<workspace>/skills/`
   - Managed skills: Electron `userData/skills/` (on macOS typically `~/Library/Application Support/cowork-os/skills/`)
-  - Bundled skills: `resources/skills/` (includes use-case templates: booking options, draft reply, family digest, household capture, newsletter digest, transaction scan)
+  - Bundled skills: `resources/skills/` (includes use-case templates: booking options, draft reply, family digest, household capture, newsletter digest, transaction scan, inbox manager, chief-of-staff briefing, smart-home brain, dev task queue, figure-it-out agent)
 
 ### 3. Messaging Gateway (Channels)
 
@@ -104,9 +121,20 @@ Core gateway code:
 - Shared channel types: `src/electron/gateway/channels/types.ts`
 
 Channel commands (chat):
+- `/inbox [triage|autopilot|followups] [limit]` runs DM-only inbox triage workflow with confirmation gates for external actions.
+- `/brief [morning|today|tomorrow|week]` generates a DM-only chief-of-staff style brief.
 - `/schedule ...` creates scheduled agent tasks that deliver results back to the originating chat (works in DM + group contexts).
 - `/digest [lookback]` generates an on-demand digest of recent chat messages (group-safe; uses the local channel message store).
 - `/followups [lookback]` extracts follow-ups/commitments from recent chat messages (group-safe; uses the local channel message store).
+- `/activation [on|off]` toggles channel activation state.
+- `/memorytrust [on|off]` toggles memory trust for the channel (controls whether agent stores memories from this channel).
+- `/selfchat [on|off]` toggles self-message capture mode.
+- `/ambient [on|off]` toggles ambient mode (ingest-only, no agent replies for non-command messages).
+- `/ingest [on|off]` toggles ingest-only mode for the channel.
+- `/prefix [text|clear]` sets or clears a response prefix for agent replies on this channel.
+- `/numbers` lists allowed phone numbers for the channel.
+- `/allow <number>` adds a phone number to the channel allowlist.
+- `/disallow <number>` removes a phone number from the channel allowlist.
 
 Attachment handling:
 - If an inbound channel message includes `attachments`, the gateway persists them under `<workspace>/.cowork/inbox/attachments/...`
@@ -147,7 +175,7 @@ Key code:
 - Registry/one-click installs: `src/electron/mcp/registry/MCPRegistryManager.ts`
 
 Enterprise connectors included in this repo (as MCP servers):
-- `connectors/*-mcp/` (Salesforce, Jira, HubSpot, Zendesk, ServiceNow, Linear, Asana, Okta)
+- `connectors/*-mcp/` (Salesforce, Jira, HubSpot, Zendesk, ServiceNow, Linear, Asana, Okta, Resend)
 - Reference doc: `docs/enterprise-connectors.md`
 
 ### 6. Memory System (Local-First)
@@ -173,6 +201,17 @@ Key code:
 
 Docs:
 - Security-focused memory guidance: `docs/security/best-practices.md`
+- Relationship agent architecture: `docs/relationship-agent-architecture.md`
+
+#### Relationship Memory
+
+Layered continuity memory that persists user identity, preferences, working context, interaction history, and commitments across sessions. `RelationshipMemoryService` manages five memory layers with upsert deduplication and builds a prompt context block injected into task execution. `UserProfileService` extracts user facts from messages and feedback, compositing them with relationship memory for personalization. The daemon records relationship memory entries on task completion.
+
+Key code:
+- Relationship memory: `src/electron/memory/RelationshipMemoryService.ts`
+- User profile extraction: `src/electron/memory/UserProfileService.ts`
+- IPC handlers: `src/electron/ipc/handlers.ts` (`memory:relationshipList`, `memory:relationshipUpdate`, `memory:relationshipDelete`, `memory:commitmentsGet`, `memory:commitmentsDueSoon`)
+- UI: `src/renderer/components/MemorySettings.tsx`
 
 ### 7. Live Canvas (Agent-Driven UI)
 
@@ -402,7 +441,7 @@ Top-level:
 - `docs/`: focused technical docs (security, remote access, canvas, connectors)
 
 Notable main-process subsystems:
-- Agent runtime: `src/electron/agent/`
+- Agent runtime: `src/electron/agent/` (includes `strategy/` for intent routing)
 - Messaging gateway: `src/electron/gateway/`
 - Security + guardrails: `src/electron/security/`, `src/electron/guardrails/`
 - Control plane: `src/electron/control-plane/`

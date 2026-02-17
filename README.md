@@ -17,7 +17,8 @@
   <a href="https://github.com/CoWork-OS/CoWork-OS/actions/workflows/ci.yml"><img src="https://github.com/CoWork-OS/CoWork-OS/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT"></a>
   <a href="https://www.apple.com/macos/"><img src="https://img.shields.io/badge/platform-macOS-blue.svg" alt="macOS"></a>
-  <a href="https://www.electronjs.org/"><img src="https://img.shields.io/badge/electron-40.0.0-47848F.svg" alt="Electron"></a>
+  <a href="https://www.electronjs.org/"><img src="https://img.shields.io/badge/electron-40.4.1-47848F.svg" alt="Electron"></a>
+  <a href="https://github.com/sponsors/CoWork-OS"><img src="https://img.shields.io/badge/Sponsor-CoWork%20OS-ff4d4f?logo=github-sponsors&logoColor=white" alt="Sponsor on GitHub"></a>
 </p>
 
 **The operating system for personal AI assistants**
@@ -28,11 +29,14 @@ Your AI needs a secure home. CoWork OS provides the runtime, security layers, an
 |---|---|
 | **20+ AI Providers** | Claude, OpenAI, Gemini, Bedrock, OpenRouter, Ollama (free/local), Groq, xAI, Kimi, Mistral, Cerebras, MiniMax, Qwen, Copilot, and more |
 | **14 Messaging Channels** | WhatsApp, Telegram, Discord, Slack, Teams, Google Chat, iMessage, Signal, Mattermost, Matrix, Twitch, LINE, BlueBubbles, Email |
-| **8 Enterprise Connectors** | Salesforce, Jira, HubSpot, Zendesk, ServiceNow, Linear, Asana, Okta |
+| **9 Enterprise Connectors** | Salesforce, Jira, HubSpot, Zendesk, ServiceNow, Linear, Asana, Okta, Resend |
 | **6 Cloud Storage** | Notion, Box, OneDrive, Google Workspace (Drive/Gmail/Calendar), Dropbox, SharePoint |
 | **Voice Calls** | Outbound phone calls via ElevenLabs Agents |
 | **Agent Teams** | Multi-agent collaboration with shared checklists and coordinated runs |
 | **Workspace Kit** | Workspace `.cowork/` kit (projects, access rules, context injection, per-workspace settings) |
+| **Intent Routing** | Per-message routing across chat/advice/planning/execution/mixed modes |
+| **Relationship Memory** | Layered continuity memory (identity, preferences, context, history, commitments) |
+| **Completion-First** | Answer-first responses, soft-deadline fallback, timeout recovery finalization |
 | **Security-First** | 2800+ unit tests, configurable guardrails, approval workflows, gateway hardening |
 | **Local-First** | Your data stays on your machine. BYOK (Bring Your Own Key) |
 
@@ -43,7 +47,29 @@ Your AI needs a secure home. CoWork OS provides the runtime, security layers, an
 - **Control-plane/LLM error handling alignment**: tests and runtime error codes now match shared validation shapes for predictable client behavior.
 - **Workspace auto-switch confidence**: improved ambiguous temp-task preflight handling when preferred workspace signals are available.
 
+### Current Branch Enhancements (Unreleased)
+
+- **Relationship-agent runtime**: tasks are now intent-routed (`chat`, `advice`, `planning`, `execution`, `mixed`) and strategy-bound before execution.
+- **Answer-first behavior**: strategy-marked prompts emit a direct user answer early, then continue with deeper execution when needed.
+- **Soft-deadline execution control**: long-running steps switch to best-effort finalization before hard timeout to reduce unfinished tasks.
+- **Timeout cancellation recovery**: timeout-triggered cancellation paths now attempt best-effort final answers instead of silent termination.
+- **Relationship memory controls**: new layered memory CRUD and commitment APIs (`open`, `done`, `due soon`) are exposed through IPC/preload and renderer memory settings.
+
 > **Status**: macOS desktop app + headless/server mode (Linux/VPS). Cross-platform desktop support planned.
+
+---
+
+## Relationship-Agent Validation (Recommended)
+
+Use this quick runbook after upgrades:
+
+1. Send a strategic prompt in a channel (for example: "How should I position this product, who should I target, and what should I achieve?").
+2. Confirm you receive a direct answer early (not only research chatter).
+3. Confirm task ends in `completed` with a final response.
+4. If timeout occurs, confirm logs show timeout recovery/finalization instead of silent cancellation.
+5. In **Settings > Memory**, confirm relationship items and commitments can be edited/forgotten and commitment status can be toggled.
+
+For a full acceptance checklist, see `docs/relationship-agent-uat.md`.
 
 ---
 
@@ -114,7 +140,7 @@ cowork-os
 
 #### Prerequisites
 
-- Node.js 22+ and npm
+- Node.js 24+ and npm
 - macOS 12 (Monterey) or later
 - One of: any supported LLM provider credentials (API key/token or AWS credentials) or Ollama installed locally
 - Xcode Command Line Tools (needed to build `better-sqlite3` for Electron): `xcode-select --install`
@@ -165,10 +191,10 @@ node -v
 npm -v
 ```
 
-`cowork-os` requires Node `>=22.12.0`. If you see `v20`/`v21`, upgrade first:
+`cowork-os` requires Node `>=24.0.0`. If you see `v22`/`v23`, upgrade first:
 
 ```bash
-curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
+curl -fsSL https://deb.nodesource.com/setup_24.x | sudo -E bash -
 sudo apt-get install -y nodejs
 node -v
 ```
@@ -2139,6 +2165,7 @@ Pre-built MCP server connectors for enterprise integrations. Install from **Sett
 | **Linear** | Product/Issue | `health`, `list_issues`, `get_issue`, `search_issues`, `create_issue`, `update_issue` |
 | **Asana** | Work Management | `health`, `list_tasks`, `get_task`, `search_tasks`, `create_task`, `update_task` |
 | **Okta** | Identity | `health`, `list_users`, `get_user`, `search_users`, `create_user`, `update_user` |
+| **Resend** | Email | `health`, `send_email`, `list_webhooks`, `create_webhook`, `delete_webhook`, `get_received_email` |
 
 ### Setup
 
@@ -2243,7 +2270,7 @@ Users must comply with their model provider's terms:
 - [x] Persistent memory system with privacy protection
 - [x] Mobile Companions with LAN access support
 - [x] Voice Mode with ElevenLabs and OpenAI integration
-- [x] Enterprise MCP Connectors (Salesforce, Jira, HubSpot, Zendesk, ServiceNow, Linear, Asana, Okta)
+- [x] Enterprise MCP Connectors (Salesforce, Jira, HubSpot, Zendesk, ServiceNow, Linear, Asana, Okta, Resend)
 - [x] Cloud Storage Integrations (Notion, Box, OneDrive, Google Drive, Dropbox, SharePoint)
 - [x] Visual Theme System (Modern/Terminal visual styles + Light/Dark/System color modes)
 - [x] Workspace recency ordering
@@ -2272,7 +2299,7 @@ Users must comply with their model provider's terms:
 - [x] Local memory embeddings and cross-workspace ChatGPT imported memory search
 - [x] Apple Calendar and Reminders tools (macOS native via AppleScript)
 - [x] Gateway ambient mode (passive message ingestion) and self-message capture
-- [x] Use-case skill templates (booking, draft reply, family digest, household capture, newsletter digest, transaction scan)
+- [x] Use-case skill templates (booking, draft reply, family digest, household capture, newsletter digest, transaction scan, inbox manager, chief-of-staff briefing, smart-home brain, dev task queue, figure-it-out agent)
 - [x] Headless Electron mode with env-based credential import (`COWORK_IMPORT_ENV_SETTINGS`)
 - [x] Node.js daemon entrypoint for non-Electron headless deployments (`coworkd-node.js`)
 - [x] Control plane web dashboard, approval API, and channel management API
