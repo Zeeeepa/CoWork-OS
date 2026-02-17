@@ -6149,7 +6149,7 @@ TASK / CONVERSATION HISTORY:
           ? this.task.createdAt
           : (step.startedAt ?? Date.now());
       let foundNewImage = false;
-      const maxIterations = 8;  // Allow enough iterations for scaffolding steps (dirs + files + verify)
+      const maxIterations = 16;  // Allow enough iterations for scaffolding steps and build-fix cycles (raised from 8)
       const maxEmptyResponses = 3;
       const maxMaxTokensRecoveries = 3; // Max recovery attempts for max_tokens truncation (mirrors Claude Code)
       let maxTokensRecoveryCount = 0;
@@ -8028,7 +8028,7 @@ TASK / CONVERSATION HISTORY:
     let hasProvidedTextResponse = false;  // Track if agent has given a text answer
     let hadToolCalls = false;  // Track if any tool calls were made
     let capabilityRefusalCount = 0;
-    const maxIterations = 8;  // Allow enough iterations for multi-tool follow-up messages
+    const maxIterations = 20;  // Allow enough iterations for multi-tool follow-up messages (raised from 8 — productive coding sessions need more room)
     const maxEmptyResponses = 3;
     const maxMaxTokensRecoveries = 3; // Max recovery attempts for max_tokens truncation
     let maxTokensRecoveryCount = 0;
